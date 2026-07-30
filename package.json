@@ -1,0 +1,24 @@
+{
+  "name": "discord-accountability",
+  "version": "1.0.0",
+  "description": "A Discord accountability-partner bot: daily check-in prompts + per-habit streak tracking.",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc && node --env-file=.env dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20.6"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "@types/node-cron": "^3.0.11",
+    "typescript": "^5.6.3"
+  }
+}
