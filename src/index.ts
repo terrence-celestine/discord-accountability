@@ -19,6 +19,7 @@ import {
   buildHelp,
 } from "./logic";
 import * as store from "./store";
+import * as audible from "./audible";
 
 // ---------- config / env ----------
 
@@ -39,6 +40,7 @@ const TZ = process.env.TZ ?? "UTC";
 const DAILY_TIME = process.env.DAILY_TIME ?? "12:00"; // the main daily check-in
 const REMINDER_TIME = process.env.REMINDER_TIME ?? "19:00"; // nudge, only if the list isn't complete
 const SEND_NOW = process.env.SEND_NOW; // "1" → fire one prompt immediately at startup (testing)
+const READING_MINUTES = Number(process.env.READING_MINUTES ?? "30"); // Audible threshold for auto-check-off
 
 // Fail fast at startup if the schedule times are malformed.
 const dailyExpr = timeToCron(DAILY_TIME);
@@ -97,6 +99,28 @@ client.once(Events.ClientReady, (c) => {
 
   cron.schedule(reminderExpr, sendReminderIfIncomplete, { timezone: TZ });
   console.log(`Scheduled evening nudge at ${REMINDER_TIME} (${TZ}) — cron "${reminderExpr}"`);
+
+  // Audible: if credentials are configured, poll hourly to auto-check-off Reading.
+  if (audible.isConfigured()) {
+    const audibleJob = async (): Promise<void> => {
+      try {
+        const r = await audible.pollAudible(TZ, READING_MINUTES);
+        if (r.checkedOff) {
+          await sendMessage(
+            `📖 Auto-checked off **reading** — ${Math.round(r.minutesToday)} min on Audible today. 🎧`,
+          );
+          console.log(`[audible] checked off reading (${Math.round(r.minutesToday)} min today).`);
+        }
+      } catch (err) {
+        console.error("[audible] poll failed:", err);
+      }
+    };
+    cron.schedule("0 * * * *", audibleJob, { timezone: TZ }); // top of every hour
+    void audibleJob(); // catch up once at startup
+    console.log(`Audible integration enabled — polling hourly (threshold ${READING_MINUTES} min).`);
+  } else {
+    console.log("Audible integration disabled (no credentials).");
+  }
 
   if (SEND_NOW === "1") {
     console.log("SEND_NOW=1 → sending one prompt now.");

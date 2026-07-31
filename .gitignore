@@ -3,4 +3,5 @@ dist/
 .env
 data/
 state.json
+audible-credentials.json
 *.tmp

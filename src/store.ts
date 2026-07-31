@@ -18,8 +18,16 @@ export interface HabitState {
   lastCompletedDate: string | null;
 }
 
+// Tracks Audible "minutes listened today" via a daily-diffed running total.
+export interface AudibleState {
+  baselineDate: string | null; // local date the baseline was anchored
+  baselineTotal: number; // total listened-minutes at the start of that day
+  lastTotal: number; // most recent observed total (used to anchor the next day)
+}
+
 export interface State {
   habits: Record<string, HabitState>;
+  audible?: AudibleState;
 }
 
 export interface CheckOffResult {
@@ -146,4 +154,17 @@ export const uncheck = (habitId: string, tz: string): UncheckResult => {
 
   save(state);
   return { wasDone: true, currentStreak: hs.currentStreak };
+};
+
+// ---------- Audible baseline (for deriving minutes listened today) ----------
+
+export const getAudibleState = (): AudibleState => {
+  const s = load();
+  return s.audible ?? { baselineDate: null, baselineTotal: 0, lastTotal: 0 };
+};
+
+export const setAudibleState = (audible: AudibleState): void => {
+  const s = load();
+  s.audible = audible;
+  save(s);
 };

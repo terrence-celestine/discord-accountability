@@ -9,12 +9,14 @@
     "dev": "tsc && node --env-file=.env dist/index.js",
     "typecheck": "tsc -p tsconfig.test.json",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "setup:audible": "tsc && node --env-file=.env dist/audible-setup.js"
   },
   "engines": {
     "node": ">=20.6"
   },
   "dependencies": {
+    "audible-api-ts": "^0.2.0",
     "discord.js": "^14.16.3",
     "node-cron": "^3.0.3"
   },

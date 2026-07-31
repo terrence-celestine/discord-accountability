@@ -10,6 +10,8 @@ each habit by keyword, checks it off for the day, and tracks a **streak per habi
 - **Persistent** — streaks are saved to `state.json` and survive restarts/redeploys.
 - **Chat commands** — `summary` / `status` (today's progress), `undo <habit>` (reverse an
   accidental check-off), and `help` (list the commands).
+- **Audible auto-check-off** (optional) — the Reading habit checks itself off once you've
+  listened ≥30 min on Audible that day. See [Audible integration](#audible-integration-optional).
 - Written in **TypeScript** (compiled to `dist/` with `tsc`).
 
 ## How it works
@@ -24,7 +26,9 @@ Content Intent**), not just a webhook. So this is a small always-on `discord.js`
 | `src/logic.ts` | Pure logic (keyword matching, streak formatting, cron parsing) — no Discord, easy to test. |
 | `src/habits.ts` | Your habit list (name + emoji + keywords). **Edit this.** |
 | `src/store.ts` | Streak state + math, saved to `state.json`. |
-| `test/` | Vitest suite (`*.test.ts`) covering `logic.ts` and `store.ts`. |
+| `src/audible.ts` | Optional Audible integration: derives minutes listened, auto-checks off Reading. |
+| `src/audible-setup.ts` | One-time local login (`npm run setup:audible`) to generate Audible credentials. |
+| `test/` | Vitest suite (`*.test.ts`) covering `logic.ts`, `store.ts`, and `audible.ts`. |
 | `tsconfig.json` | TypeScript compiler config (`src/` → `dist/`). |
 | `railway.json` | Railway deploy config (always-on service). |
 | `.env.example` | The env vars you need to set. |
@@ -86,6 +90,32 @@ directly. They cover streak math (continue / reset / no double-count / broken), 
 keyword matching + the negation guard, the daily/evening message builders, and cron-time
 parsing. Each test file uses its own temp `DATA_DIR`, so they never touch your real
 `state.json`.
+
+## Audible integration (optional)
+
+The Reading habit can check itself off automatically based on real Audible listening time.
+It's fully optional — leave `AUDIBLE_CREDENTIALS` unset and the bot ignores it entirely.
+
+**How it works:** the bot polls your Audible library hourly via
+[`audible-api-ts`](https://www.npmjs.com/package/audible-api-ts), derives your total minutes
+listened (Σ book length × percent complete), diffs it against a daily baseline to get
+"minutes listened today," and once that clears `READING_MINUTES` (default 30) it checks off
+`reading`. Uses the private Audible API (an unofficial, ToS-gray-area, may-break integration).
+
+**One-time setup (run locally — it needs your Amazon login):**
+
+```bash
+npm run setup:audible
+```
+
+It prints an Amazon login URL; sign in, then paste back the redirect URL (the one containing
+`openid.oa2.authorization_code`). It saves credentials to `DATA_DIR/audible-credentials.json`
+and prints a listening-time sanity check so you can confirm the numbers look right.
+
+**For Railway:** copy the saved credentials JSON into the **`AUDIBLE_CREDENTIALS`** variable
+(one line). On first boot the bot writes it to the `/data` volume and **auto-refreshes the
+tokens from then on** — no recurring re-login. Optionally set `AUDIBLE_LOCALE` (default `com`)
+and `READING_MINUTES` (default `30`).
 
 ## 6. Deploy to Railway (always-on)
 
