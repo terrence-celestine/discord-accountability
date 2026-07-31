@@ -174,12 +174,10 @@ client.on(Events.MessageCreate, async (message: Message) => {
   for (const habit of matched) {
     const res = store.checkOff(habit.id, TZ);
     if (res.alreadyDone) {
-      parts.push(`**${habit.name}** already checked off today (${fireEmoji(res.currentStreak)})`);
+      parts.push(`${habit.emoji} **${habit.name}** (already done today)`);
     } else {
       anyNew = true;
-      const best =
-        res.currentStreak === res.longestStreak && res.longestStreak > 1 ? " 🏆 personal best!" : "";
-      parts.push(`**${habit.name}** ✅ ${fireEmoji(res.currentStreak)} day streak${best}`);
+      parts.push(`${habit.emoji} **${habit.name}**`);
     }
   }
 
