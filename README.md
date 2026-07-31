@@ -6,7 +6,7 @@ whole list**. When you reply with what you did ("drank my water and prayed"), it
 each habit by keyword, checks it off for the day, and tracks a **streak per habit**.
 
 - **Multiple named habits**, each with its own streak (edit `src/habits.ts`).
-- **Keyword detection** with a basic negation guard ("didn't go to the gym" won't count).
+- **Keyword detection** with a basic negation guard ("didn't shower" won't count).
 - **Persistent** — streaks are saved to `state.json` and survive restarts/redeploys.
 - Written in **TypeScript** (compiled to `dist/` with `tsc`).
 
@@ -87,18 +87,27 @@ parsing. Each test file uses its own temp `DATA_DIR`, so they never touch your r
 
 ## 6. Deploy to Railway (always-on)
 
-1. Install the CLI and log in: `npm i -g @railway/cli && railway login`.
-2. From this folder: `railway init` then `railway up` (deploys the local folder — no GitHub
-   needed).
-3. **Add a Volume** (Service → Settings → Volumes) mounted at **`/data`** so streaks persist
+Railway deploys straight from GitHub and redeploys on every push.
+
+1. Push this repo to GitHub (the repo root should be this project — `package.json` at the top).
+2. On <https://railway.app>: **New Project → Deploy from GitHub repo** → pick the repo. The
+   first deploy will crash until you set the variables below — that's expected.
+3. **Add a Volume** (service → Settings → Volumes) mounted at **`/data`** so streaks persist
    across deploys.
-4. **Variables** (Service → Variables): set `DISCORD_TOKEN`, `CHANNEL_ID`, `USER_ID`, `TZ`,
+4. **Variables** (service → Variables): set `DISCORD_TOKEN`, `CHANNEL_ID`, `USER_ID`, `TZ`,
    `DAILY_TIME`, `REMINDER_TIME`, and `DATA_DIR=/data`. (Leave `SEND_NOW` unset in production.)
 
-Railway auto-detects the `build` script, so it runs `npm run build` (compiles TypeScript)
-and then `npm start` (`node dist/index.js`) — no extra config needed.
+Build and start are driven by `railway.json`: it runs `npm run build` (compiles `src/` →
+`dist/`) and starts with `node dist/index.js`. **The start command must point at
+`dist/index.js`, not `index.js`** — the source is TypeScript, so the entrypoint only exists
+after the build. This is a background worker with no web server, so no public domain is needed.
 
-That's it — the bot stays online and pings you every day at `DAILY_TIME` in your `TZ`.
+That's it — the bot stays online and pings you every day at `DAILY_TIME` in your `TZ`. Every
+`git push` to the default branch triggers a fresh deploy, and the `/data` volume keeps your
+streaks across deploys.
+
+> Prefer the CLI? `npm i -g @railway/cli && railway login`, then `railway up` from this folder
+> deploys without GitHub. You still add the volume and variables in the dashboard.
 
 ## Notes
 
