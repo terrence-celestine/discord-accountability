@@ -4,7 +4,7 @@ import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
 import * as store from "../src/store";
-import { timeToCron, remainingHabits, buildReminder, buildDailyPrompt } from "../src/logic";
+import { timeToCron, remainingHabits, buildReminder, buildDailyPrompt, buildSummary } from "../src/logic";
 import { habits } from "../src/habits";
 
 const TZ = "America/Los_Angeles";
@@ -70,4 +70,35 @@ test("buildDailyPrompt mentions the user and lists every habit", () => {
   for (const h of habits) {
     expect(msg).toContain(h.name);
   }
+});
+
+test("buildSummary splits habits into done (with streaks) and left", () => {
+  store.save({
+    habits: {
+      water: { currentStreak: 3, longestStreak: 3, lastCompletedDate: today },
+      pray: { currentStreak: 1, longestStreak: 1, lastCompletedDate: today },
+    },
+  });
+  const msg = buildSummary(TZ);
+  expect(msg).toMatch(new RegExp(`2/${habits.length} done`));
+  expect(msg).toContain("✅ Done");
+  expect(msg).toMatch(/Drink 1 gallon of water \(🔥 3\)/);
+  expect(msg).toContain("Pray (🔥 1)");
+  expect(msg).toMatch(new RegExp(`Left \\(${habits.length - 2}\\)`));
+  expect(msg).toContain("Read for 30 minutes"); // an untouched habit shows under Left
+});
+
+test("buildSummary celebrates when everything is done", () => {
+  const all: Record<string, { currentStreak: number; longestStreak: number; lastCompletedDate: string }> = {};
+  for (const h of habits) all[h.id] = { currentStreak: 1, longestStreak: 1, lastCompletedDate: today };
+  store.save({ habits: all });
+  const msg = buildSummary(TZ);
+  expect(msg).toMatch(new RegExp(`${habits.length}/${habits.length} done`));
+  expect(msg).toMatch(/Everything's done/);
+});
+
+test("buildSummary with nothing done shows 0 and all habits left", () => {
+  const msg = buildSummary(TZ);
+  expect(msg).toMatch(new RegExp(`0/${habits.length} done`));
+  expect(msg).toMatch(new RegExp(`Left \\(${habits.length}\\)`));
 });

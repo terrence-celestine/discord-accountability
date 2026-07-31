@@ -15,6 +15,7 @@ import {
   buildDailyPrompt,
   remainingHabits,
   buildReminder,
+  buildSummary,
 } from "./logic";
 import * as store from "./store";
 
@@ -107,6 +108,15 @@ client.on(Events.MessageCreate, async (message: Message) => {
   if (message.author.bot) return;
   if (message.channelId !== CHANNEL_ID) return;
   if (message.author.id !== USER_ID) return;
+
+  // "summary" / "status" command → report today's progress on demand.
+  if (/^[!\/]?(summary|status)$/.test(message.content.trim().toLowerCase())) {
+    await message.reply({
+      content: buildSummary(TZ),
+      allowedMentions: { repliedUser: false },
+    });
+    return;
+  }
 
   const matched = matchedHabits(message.content);
   if (matched.length === 0) return; // just chatting; stay quiet

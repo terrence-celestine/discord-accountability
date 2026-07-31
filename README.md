@@ -8,6 +8,8 @@ each habit by keyword, checks it off for the day, and tracks a **streak per habi
 - **Multiple named habits**, each with its own streak (edit `src/habits.ts`).
 - **Keyword detection** with a basic negation guard ("didn't shower" won't count).
 - **Persistent** — streaks are saved to `state.json` and survive restarts/redeploys.
+- **`summary` command** — type `summary` (or `status`) any time to see what you've done today
+  and what's still left.
 - Written in **TypeScript** (compiled to `dist/` with `tsc`).
 
 ## How it works
@@ -116,3 +118,5 @@ streaks across deploys.
   streak as broken once a full day is missed.
 - The bot only reacts to **your** user ID in the **configured channel** — it ignores everyone
   else and other channels.
+- Type **`summary`** or **`status`** (optionally prefixed with `!` or `/`) to get an on-demand
+  report of today's progress — done habits with their streaks, plus what's left.

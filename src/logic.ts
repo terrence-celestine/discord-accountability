@@ -96,3 +96,30 @@ export function buildReminder(userId: string, remaining: Habit[]): string {
     `\n\nReply with what you knocked out and I'll check them off. 💪`
   );
 }
+
+// On-demand progress report: what's done today (with streaks) and what's left.
+export function buildSummary(tz: string): string {
+  const state = store.load();
+  const today = store.todayStr(tz);
+
+  const done: Habit[] = [];
+  const left: Habit[] = [];
+  for (const h of habits) {
+    const hs = state.habits[h.id];
+    if (hs && hs.lastCompletedDate === today) done.push(h);
+    else left.push(h);
+  }
+
+  const header = `📋 **Today's summary** — ${done.length}/${habits.length} done`;
+
+  const doneBlock = done.length
+    ? "\n\n**✅ Done**\n" +
+      done.map((h) => `• ${h.name} (🔥 ${state.habits[h.id].currentStreak})`).join("\n")
+    : "";
+
+  const leftBlock = left.length
+    ? `\n\n**⬜ Left (${left.length})**\n` + left.map((h) => `• ${h.name}`).join("\n")
+    : "\n\n🎉 Everything's done for today — nice work!";
+
+  return header + doneBlock + leftBlock;
+}
