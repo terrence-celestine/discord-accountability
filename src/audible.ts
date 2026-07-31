@@ -54,15 +54,25 @@ export const isConfigured = (): boolean => loadCredentials() !== null;
 
 const clamp = (n: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, n));
 
-// Total lifetime minutes listened = Σ (book length × how far through it you are).
-// Monotonically increases as you listen, which is what lets us diff it per day.
+// Minutes listened for a single book. Prefer timeRemainingSeconds (second-precision) →
+// duration − remaining; fall back to whole-percent progress, then the finished flag.
+const bookListenedMinutes = (item: Pick<AudibleItem, "durationMinutes" | "listeningStatus">): number => {
+  const ls = item.listeningStatus;
+  if (!ls) return 0;
+  if (ls.timeRemainingSeconds != null) {
+    return clamp(item.durationMinutes - ls.timeRemainingSeconds / 60, 0, item.durationMinutes);
+  }
+  if (ls.percentComplete != null) {
+    return (item.durationMinutes * clamp(ls.percentComplete, 0, 100)) / 100;
+  }
+  return ls.isFinished ? item.durationMinutes : 0;
+};
+
+// Total lifetime minutes listened = Σ per-book listened minutes. Monotonically increases as
+// you listen, which is what lets us diff it per day.
 export const totalListenedMinutes = (
   items: Pick<AudibleItem, "durationMinutes" | "listeningStatus">[],
-): number =>
-  items.reduce((sum, it) => {
-    const pct = it.listeningStatus?.percentComplete ?? 0;
-    return sum + (it.durationMinutes * clamp(pct, 0, 100)) / 100;
-  }, 0);
+): number => items.reduce((sum, it) => sum + bookListenedMinutes(it), 0);
 
 // Given the previous baseline and the current total, work out minutes listened *today*.
 export const computeMinutesToday = (

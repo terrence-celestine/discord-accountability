@@ -18,6 +18,29 @@ test("totalListenedMinutes clamps out-of-range percentages", () => {
   expect(totalListenedMinutes(items)).toBe(100);
 });
 
+test("timeRemainingSeconds gives precise minutes (duration − remaining)", () => {
+  const items = [{ durationMinutes: 60, listeningStatus: { timeRemainingSeconds: 900 } }]; // 60 − 15
+  expect(totalListenedMinutes(items)).toBe(45);
+});
+
+test("timeRemainingSeconds takes precedence over whole-percent progress", () => {
+  // percent would say 10 min; the second-precise remaining says 50 min — use the precise one.
+  const items = [
+    { durationMinutes: 100, listeningStatus: { percentComplete: 10, timeRemainingSeconds: 3000 } },
+  ];
+  expect(totalListenedMinutes(items)).toBe(50);
+});
+
+test("timeRemainingSeconds exceeding duration clamps to 0", () => {
+  const items = [{ durationMinutes: 30, listeningStatus: { timeRemainingSeconds: 3600 } }];
+  expect(totalListenedMinutes(items)).toBe(0);
+});
+
+test("a finished book with no times counts as fully listened", () => {
+  const items = [{ durationMinutes: 200, listeningStatus: { isFinished: true } }];
+  expect(totalListenedMinutes(items)).toBe(200);
+});
+
 const state = (o: Partial<AudibleState>): AudibleState => ({
   baselineDate: null,
   baselineTotal: 0,
