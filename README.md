@@ -18,9 +18,11 @@ Content Intent**), not just a webhook. So this is a small always-on `discord.js`
 
 | File | What it is |
 |------|------------|
-| `src/index.ts` | Bot: intents, daily cron prompt + evening nudge, reply handler. |
+| `src/index.ts` | Discord wiring: intents, daily cron prompt + evening nudge, reply handler. |
+| `src/logic.ts` | Pure logic (keyword matching, streak formatting, cron parsing) — no Discord, easy to test. |
 | `src/habits.ts` | Your habit list (name + keywords). **Edit this.** |
 | `src/store.ts` | Streak state + math, saved to `state.json`. |
+| `test/` | Vitest suite (`*.test.ts`) covering `logic.ts` and `store.ts`. |
 | `tsconfig.json` | TypeScript compiler config (`src/` → `dist/`). |
 | `railway.json` | Railway deploy config (always-on service). |
 | `.env.example` | The env vars you need to set. |
@@ -67,8 +69,21 @@ npm run dev               # compiles TypeScript, then runs the bot with .env loa
 Reply in the channel ("drank my water and prayed") and watch it react ✅ and report your
 streak. `./data/state.json` will show the saved streak.
 
-Other scripts: `npm run build` (compile only), `npm run typecheck` (type-check without
-emitting), `npm start` (run the already-compiled `dist/`, used by Railway).
+Other scripts: `npm run build` (compile only), `npm run typecheck` (type-check `src/` + tests),
+`npm start` (run the already-compiled `dist/`, used by Railway).
+
+### Tests
+
+```bash
+npm test          # run once
+npm run test:watch  # re-run on change
+```
+
+Tests are written in TypeScript and run with **Vitest**, importing the source in `src/`
+directly. They cover streak math (continue / reset / no double-count / broken), persistence,
+keyword matching + the negation guard, the daily/evening message builders, and cron-time
+parsing. Each test file uses its own temp `DATA_DIR`, so they never touch your real
+`state.json`.
 
 ## 6. Deploy to Railway (always-on)
 

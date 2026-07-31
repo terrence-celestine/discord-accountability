@@ -2,13 +2,19 @@
 //
 // State lives in a single JSON file on disk (a mounted Railway Volume in prod,
 // a local folder in dev). Writes are atomic (temp file + rename) so a crash
-// mid-write can't corrupt the file.
+// mid-write can't corrupt the file. DATA_DIR is read per-call (not cached at
+// import), so tests can point it at a temp directory at runtime.
 
 import fs from "fs";
 import path from "path";
 
-const DATA_DIR = process.env.DATA_DIR || "/data";
-const STATE_PATH = path.join(DATA_DIR, "state.json");
+function dataDir(): string {
+  return process.env.DATA_DIR || "/data";
+}
+
+export function statePath(): string {
+  return path.join(dataDir(), "state.json");
+}
 
 export interface HabitState {
   currentStreak: number;
@@ -62,7 +68,7 @@ function daysBetween(fromStr: string, toStr: string): number {
 
 export function load(): State {
   try {
-    const raw = fs.readFileSync(STATE_PATH, "utf8");
+    const raw = fs.readFileSync(statePath(), "utf8");
     const parsed = JSON.parse(raw) as Partial<State>;
     if (!parsed.habits) parsed.habits = {};
     return parsed as State;
@@ -73,10 +79,11 @@ export function load(): State {
 }
 
 export function save(state: State): void {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  const tmp = STATE_PATH + ".tmp";
+  fs.mkdirSync(dataDir(), { recursive: true });
+  const target = statePath();
+  const tmp = target + ".tmp";
   fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
-  fs.renameSync(tmp, STATE_PATH); // atomic on the same filesystem
+  fs.renameSync(tmp, target); // atomic on the same filesystem
 }
 
 function habitState(state: State, habitId: string): HabitState {
@@ -123,5 +130,3 @@ export function checkOff(habitId: string, tz: string): CheckOffResult {
   save(state);
   return { alreadyDone: false, currentStreak: hs.currentStreak, longestStreak: hs.longestStreak };
 }
-
-export { STATE_PATH };
