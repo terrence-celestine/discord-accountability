@@ -9,7 +9,7 @@ const TZ = "America/Los_Angeles";
 let today: string;
 
 // Pure calendar arithmetic → YYYY-MM-DD, N days from `today`.
-function shift(days: number): string {
+const shift = (days: number): string => {
   const [y, m, d] = today.split("-").map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d));
   dt.setUTCDate(dt.getUTCDate() + days);
@@ -19,7 +19,7 @@ function shift(days: number): string {
     month: "2-digit",
     day: "2-digit",
   }).format(dt);
-}
+};
 
 beforeAll(() => {
   // store reads DATA_DIR per-call, so setting it here (at runtime) is enough.

@@ -21,14 +21,14 @@ import * as store from "./store";
 
 // ---------- config / env ----------
 
-function must(name: string): string {
+const must = (name: string): string => {
   const v = process.env[name];
   if (!v) {
     console.error(`Missing required env var: ${name}`);
     process.exit(1);
   }
   return v;
-}
+};
 
 const DISCORD_TOKEN = must("DISCORD_TOKEN");
 const CHANNEL_ID = must("CHANNEL_ID");
@@ -53,7 +53,7 @@ const client = new Client({
   ],
 });
 
-async function sendMessage(content: string): Promise<void> {
+const sendMessage = async (content: string): Promise<void> => {
   const channel = await client.channels.fetch(CHANNEL_ID);
   if (!channel?.isTextBased()) {
     throw new Error(`Channel ${CHANNEL_ID} is not a text channel the bot can post in.`);
@@ -62,19 +62,19 @@ async function sendMessage(content: string): Promise<void> {
     content,
     allowedMentions: { users: [USER_ID] }, // only ping the one user
   });
-}
+};
 
-async function sendDailyPrompt(): Promise<void> {
+const sendDailyPrompt = async (): Promise<void> => {
   try {
     await sendMessage(buildDailyPrompt(USER_ID, TZ));
     console.log(`[${new Date().toISOString()}] Sent daily prompt.`);
   } catch (err) {
     console.error("Failed to send daily prompt:", err);
   }
-}
+};
 
 // The evening nudge: only fires if some habits are still incomplete for the day.
-async function sendReminderIfIncomplete(): Promise<void> {
+const sendReminderIfIncomplete = async (): Promise<void> => {
   try {
     const remaining = remainingHabits(TZ);
     if (remaining.length === 0) {
@@ -86,7 +86,7 @@ async function sendReminderIfIncomplete(): Promise<void> {
   } catch (err) {
     console.error("Failed to send reminder:", err);
   }
-}
+};
 
 client.once(Events.ClientReady, (c) => {
   console.log(`Logged in as ${c.user.tag}`);
