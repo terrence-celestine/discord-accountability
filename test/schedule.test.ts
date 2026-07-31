@@ -72,7 +72,13 @@ test("buildDailyPrompt mentions the user and lists every habit", () => {
   }
 });
 
-test("buildSummary splits habits into done (with streaks) and left", () => {
+test("every habit defines a non-empty emoji", () => {
+  for (const h of habits) {
+    expect(h.emoji.length).toBeGreaterThan(0);
+  }
+});
+
+test("buildSummary splits habits into done (with streaks) and left, showing emojis", () => {
   store.save({
     habits: {
       water: { currentStreak: 3, longestStreak: 3, lastCompletedDate: today },
@@ -82,10 +88,10 @@ test("buildSummary splits habits into done (with streaks) and left", () => {
   const msg = buildSummary(TZ);
   expect(msg).toMatch(new RegExp(`2/${habits.length} done`));
   expect(msg).toContain("✅ Done");
-  expect(msg).toMatch(/Drink 1 gallon of water \(🔥 3\)/);
-  expect(msg).toContain("Pray (🔥 1)");
+  expect(msg).toContain("💧 Drink 1 gallon of water (🔥 3)");
+  expect(msg).toContain("🙏 Pray (🔥 1)");
   expect(msg).toMatch(new RegExp(`Left \\(${habits.length - 2}\\)`));
-  expect(msg).toContain("Read for 30 minutes"); // an untouched habit shows under Left
+  expect(msg).toContain("📖 Read for 30 minutes"); // an untouched habit shows under Left
 });
 
 test("buildSummary celebrates when everything is done", () => {

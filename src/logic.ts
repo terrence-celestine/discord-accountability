@@ -65,7 +65,7 @@ export const buildDailyPrompt = (userId: string, tz: string): string => {
   const lines = habits.map((h) => {
     const eff = store.effectiveStreak(state.habits[h.id], tz);
     const tail = eff > 0 ? `${fireEmoji(eff)} — keep it alive!` : "start a streak today";
-    return `• **${h.name}** — ${tail}`;
+    return `${h.emoji} **${h.name}** — ${tail}`;
   });
   return (
     `<@${userId}> ☀️ **Daily check-in** — what did you get done today?\n` +
@@ -85,7 +85,7 @@ export const remainingHabits = (tz: string): Habit[] => {
 };
 
 export const buildReminder = (userId: string, remaining: Habit[]): string => {
-  const lines = remaining.map((h) => `• ${h.name}`);
+  const lines = remaining.map((h) => `${h.emoji} ${h.name}`);
   return (
     `<@${userId}> ⏰ **Evening nudge** — ${remaining.length} left to finish today:\n\n` +
     lines.join("\n") +
@@ -110,11 +110,11 @@ export const buildSummary = (tz: string): string => {
 
   const doneBlock = done.length
     ? "\n\n**✅ Done**\n" +
-      done.map((h) => `• ${h.name} (🔥 ${state.habits[h.id].currentStreak})`).join("\n")
+      done.map((h) => `${h.emoji} ${h.name} (🔥 ${state.habits[h.id].currentStreak})`).join("\n")
     : "";
 
   const leftBlock = left.length
-    ? `\n\n**⬜ Left (${left.length})**\n` + left.map((h) => `• ${h.name}`).join("\n")
+    ? `\n\n**⬜ Left (${left.length})**\n` + left.map((h) => `${h.emoji} ${h.name}`).join("\n")
     : "\n\n🎉 Everything's done for today — nice work!";
 
   return header + doneBlock + leftBlock;

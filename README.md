@@ -22,7 +22,7 @@ Content Intent**), not just a webhook. So this is a small always-on `discord.js`
 |------|------------|
 | `src/index.ts` | Discord wiring: intents, daily cron prompt + evening nudge, reply handler. |
 | `src/logic.ts` | Pure logic (keyword matching, streak formatting, cron parsing) — no Discord, easy to test. |
-| `src/habits.ts` | Your habit list (name + keywords). **Edit this.** |
+| `src/habits.ts` | Your habit list (name + emoji + keywords). **Edit this.** |
 | `src/store.ts` | Streak state + math, saved to `state.json`. |
 | `test/` | Vitest suite (`*.test.ts`) covering `logic.ts` and `store.ts`. |
 | `tsconfig.json` | TypeScript compiler config (`src/` → `dist/`). |
