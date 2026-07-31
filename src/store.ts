@@ -28,6 +28,11 @@ export interface CheckOffResult {
   longestStreak: number;
 }
 
+export interface UncheckResult {
+  wasDone: boolean;
+  currentStreak: number;
+}
+
 // ---------- date helpers (all "dates" are local calendar days in a timezone) ----------
 
 // Format a Date as YYYY-MM-DD in the given IANA timezone. 'en-CA' yields ISO-ish output.
@@ -122,4 +127,23 @@ export const checkOff = (habitId: string, tz: string): CheckOffResult => {
 
   save(state);
   return { alreadyDone: false, currentStreak: hs.currentStreak, longestStreak: hs.longestStreak };
+};
+
+// Reverse today's check-off for a habit (correction tool). Only affects a habit completed
+// today. longestStreak (the all-time best) is intentionally left untouched.
+export const uncheck = (habitId: string, tz: string): UncheckResult => {
+  const state = load();
+  const hs = state.habits[habitId];
+  const today = todayStr(tz);
+
+  if (!hs || hs.lastCompletedDate !== today) {
+    return { wasDone: false, currentStreak: hs ? hs.currentStreak : 0 };
+  }
+
+  hs.currentStreak = Math.max(0, hs.currentStreak - 1);
+  // A streak of N ending today means yesterday was day N-1; if it drops to 0, no active streak.
+  hs.lastCompletedDate = hs.currentStreak > 0 ? addDays(today, -1) : null;
+
+  save(state);
+  return { wasDone: true, currentStreak: hs.currentStreak };
 };

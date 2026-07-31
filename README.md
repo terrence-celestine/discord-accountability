@@ -8,8 +8,8 @@ each habit by keyword, checks it off for the day, and tracks a **streak per habi
 - **Multiple named habits**, each with its own streak (edit `src/habits.ts`).
 - **Keyword detection** with a basic negation guard ("didn't shower" won't count).
 - **Persistent** — streaks are saved to `state.json` and survive restarts/redeploys.
-- **`summary` command** — type `summary` (or `status`) any time to see what you've done today
-  and what's still left.
+- **Chat commands** — `summary` / `status` (today's progress), `undo <habit>` (reverse an
+  accidental check-off), and `help` (list the commands).
 - Written in **TypeScript** (compiled to `dist/` with `tsc`).
 
 ## How it works
@@ -118,5 +118,9 @@ streaks across deploys.
   streak as broken once a full day is missed.
 - The bot only reacts to **your** user ID in the **configured channel** — it ignores everyone
   else and other channels.
-- Type **`summary`** or **`status`** (optionally prefixed with `!` or `/`) to get an on-demand
-  report of today's progress — done habits with their streaks, plus what's left.
+- **Commands** (optionally prefixed with `!` or `/`):
+  - **`summary`** / **`status`** — on-demand report of today's progress (done habits with their
+    streaks, plus what's left).
+  - **`undo <habit>`** — reverse today's check-off for a habit (e.g. `undo water`, or
+    `undo water and pray` for several). Steps the streak back; leaves your all-time best intact.
+  - **`help`** — lists the commands and how check-off works.

@@ -91,3 +91,29 @@ test("load() returns an empty store when no file exists yet", () => {
   fs.rmSync(store.statePath(), { force: true });
   expect(store.load()).toEqual({ habits: {} });
 });
+
+test("uncheck reverses today's check-off and steps the streak back to yesterday", () => {
+  store.save({ habits: { water: { currentStreak: 4, longestStreak: 6, lastCompletedDate: shift(-1) } } });
+  store.checkOff("water", TZ); // now streak 5, completed today
+  expect(store.uncheck("water", TZ)).toEqual({ wasDone: true, currentStreak: 4 });
+  const hs = store.load().habits.water;
+  expect(hs.currentStreak).toBe(4);
+  expect(hs.lastCompletedDate).toBe(shift(-1)); // back to yesterday
+  expect(hs.longestStreak).toBe(6); // all-time best untouched
+});
+
+test("undoing a streak of 1 clears the completion date", () => {
+  store.checkOff("pray", TZ); // first ever → streak 1, completed today
+  expect(store.uncheck("pray", TZ)).toEqual({ wasDone: true, currentStreak: 0 });
+  expect(store.load().habits.pray.lastCompletedDate).toBe(null);
+});
+
+test("uncheck does nothing when the habit wasn't completed today", () => {
+  store.save({ habits: { water: { currentStreak: 3, longestStreak: 3, lastCompletedDate: shift(-1) } } });
+  expect(store.uncheck("water", TZ)).toEqual({ wasDone: false, currentStreak: 3 });
+  expect(store.load().habits.water.lastCompletedDate).toBe(shift(-1)); // unchanged
+});
+
+test("uncheck on a never-tracked habit is a no-op", () => {
+  expect(store.uncheck("meditate", TZ)).toEqual({ wasDone: false, currentStreak: 0 });
+});

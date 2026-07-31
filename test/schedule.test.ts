@@ -4,7 +4,7 @@ import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
 import * as store from "../src/store";
-import { timeToCron, remainingHabits, buildReminder, buildDailyPrompt, buildSummary } from "../src/logic";
+import { timeToCron, remainingHabits, buildReminder, buildDailyPrompt, buildSummary, buildHelp, matchedHabits } from "../src/logic";
 import { habits } from "../src/habits";
 
 const TZ = "America/Los_Angeles";
@@ -107,4 +107,17 @@ test("buildSummary with nothing done shows 0 and all habits left", () => {
   const msg = buildSummary(TZ);
   expect(msg).toMatch(new RegExp(`0/${habits.length} done`));
   expect(msg).toMatch(new RegExp(`Left \\(${habits.length}\\)`));
+});
+
+test("buildHelp lists the commands and the configured schedule times", () => {
+  const msg = buildHelp("12:00", "19:00");
+  expect(msg).toMatch(/summary.*status/);
+  expect(msg).toContain("undo <habit>");
+  expect(msg).toContain("help");
+  expect(msg).toContain("12:00");
+  expect(msg).toContain("19:00");
+});
+
+test("matchedHabits resolves a multi-habit undo argument", () => {
+  expect(matchedHabits("water and pray").map((h) => h.id)).toEqual(["water", "pray"]);
 });

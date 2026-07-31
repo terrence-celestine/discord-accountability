@@ -60,6 +60,21 @@ export const timeToCron = (hhmm: string): string => {
 
 export const fireEmoji = (n: number): string => (n > 0 ? `🔥 ${n}` : "no streak yet");
 
+export const buildHelp = (dailyTime: string, reminderTime: string): string =>
+  [
+    "🤖 **Accountability bot — how it works**",
+    "",
+    "Reply with what you did and I'll check it off and track a streak per habit — e.g. " +
+      '*"drank my water and prayed"*. You can mention several at once.',
+    "",
+    "**Commands**",
+    "• `summary` / `status` — today's progress (done + what's left)",
+    "• `undo <habit>` — remove today's check-off, e.g. `undo water`",
+    "• `help` — this message",
+    "",
+    `I post a check-in daily at ${dailyTime} and a nudge at ${reminderTime} if you're not done. 🔥`,
+  ].join("\n");
+
 export const buildDailyPrompt = (userId: string, tz: string): string => {
   const state = store.load();
   const lines = habits.map((h) => {

@@ -16,6 +16,7 @@ import {
   remainingHabits,
   buildReminder,
   buildSummary,
+  buildHelp,
 } from "./logic";
 import * as store from "./store";
 
@@ -109,10 +110,57 @@ client.on(Events.MessageCreate, async (message: Message) => {
   if (message.channelId !== CHANNEL_ID) return;
   if (message.author.id !== USER_ID) return;
 
+  const trimmed = message.content.trim();
+  const lower = trimmed.toLowerCase();
+
+  // "help" command → explain the bot and list the commands.
+  if (/^[!\/]?help$/.test(lower)) {
+    await message.reply({
+      content: buildHelp(DAILY_TIME, REMINDER_TIME),
+      allowedMentions: { repliedUser: false },
+    });
+    return;
+  }
+
   // "summary" / "status" command → report today's progress on demand.
-  if (/^[!\/]?(summary|status)$/.test(message.content.trim().toLowerCase())) {
+  if (/^[!\/]?(summary|status)$/.test(lower)) {
     await message.reply({
       content: buildSummary(TZ),
+      allowedMentions: { repliedUser: false },
+    });
+    return;
+  }
+
+  // "undo <habit>" command → reverse today's check-off. Must run BEFORE keyword check-off,
+  // or "undo water" would match the "water" keyword and check it ON instead.
+  const undoMatch = /^[!\/]?undo\b(.*)/i.exec(trimmed);
+  if (undoMatch) {
+    const arg = undoMatch[1].trim();
+    if (!arg) {
+      await message.reply({
+        content: "Which habit should I undo? e.g. `undo water`",
+        allowedMentions: { repliedUser: false },
+      });
+      return;
+    }
+    const targets = matchedHabits(arg);
+    if (targets.length === 0) {
+      await message.reply({
+        content: "I couldn't tell which habit that is — try `undo <habit keyword>`.",
+        allowedMentions: { repliedUser: false },
+      });
+      return;
+    }
+    const lines = targets.map((habit) => {
+      const res = store.uncheck(habit.id, TZ);
+      if (!res.wasDone) {
+        return `${habit.emoji} **${habit.name}** wasn't checked off today.`;
+      }
+      const streak = res.currentStreak > 0 ? fireEmoji(res.currentStreak) : "no active streak";
+      return `${habit.emoji} **${habit.name}** unchecked — ${streak}`;
+    });
+    await message.reply({
+      content: lines.join("\n"),
       allowedMentions: { repliedUser: false },
     });
     return;
