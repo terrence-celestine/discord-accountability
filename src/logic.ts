@@ -4,6 +4,8 @@
 // state via store), so it's easy to unit-test without a gateway connection.
 // index.ts imports these and wires them to discord.js events.
 
+import { EmbedBuilder } from "discord.js";
+
 import { habits, Habit } from "./habits";
 import * as store from "./store";
 
@@ -57,37 +59,81 @@ export const timeToCron = (hhmm: string): string => {
 };
 
 // ---------- message builders ----------
+//
+// Every outbound bot message is a Discord embed — a card with a colored accent
+// bar, an emoji title, and structured fields (the same look as the deal cards
+// other bots post). Builders return a ready-to-send payload: `embeds` carries
+// the card, and `content` carries the raw @-mention when we need to actually
+// ping the user (mentions written inside an embed don't trigger a notification).
+
+export interface BotMessage {
+  content?: string;
+  embeds: EmbedBuilder[];
+}
+
+// One place for the palette so every card feels like the same product.
+export const COLORS = {
+  daily: 0xfdb813, // sunrise gold — the morning check-in
+  nudge: 0xe67e22, // amber — the evening nudge
+  summary: 0x5865f2, // blurple — on-demand status
+  done: 0x57f287, // green — a successful check-off
+  undo: 0xed4245, // red — an undo
+  help: 0x5865f2, // blurple — help
+  audible: 0xf29f05, // orange — Audible
+} as const;
+
+const FOOTER = "Accountability bot • one reply can check off several habits";
+
+// Base card: colored bar + emoji title. Callers add description/fields/footer.
+export const card = (color: number, title: string): EmbedBuilder =>
+  new EmbedBuilder().setColor(color).setTitle(title);
+
+// A minimal one-line card for quick confirmations, errors, and notes.
+export const simpleCard = (color: number, title: string, description: string): BotMessage => ({
+  embeds: [card(color, title).setDescription(description)],
+});
 
 export const fireEmoji = (n: number): string => (n > 0 ? `🔥 ${n}` : "no streak yet");
 
-export const buildHelp = (dailyTime: string, reminderTime: string): string =>
-  [
-    "🤖 **Accountability bot — how it works**",
-    "",
-    "Reply with what you did and I'll check it off and track a streak per habit — e.g. " +
-      '*"drank my water and prayed"*. You can mention several at once.',
-    "",
-    "**Commands**",
-    "• `summary` / `status` — today's progress (done + what's left)",
-    "• `undo <habit>` — remove today's check-off, e.g. `undo water`",
-    "• `audible` — check your Audible minutes today and auto-check reading at 30 min",
-    "• `help` — this message",
-    "",
-    `I post a check-in daily at ${dailyTime} and a nudge at ${reminderTime} if you're not done. 🔥`,
-  ].join("\n");
+export const buildHelp = (dailyTime: string, reminderTime: string): BotMessage => {
+  const embed = card(COLORS.help, "🤖 Accountability Bot — How It Works")
+    .setDescription(
+      "Reply with what you did and I'll check it off and track a streak per habit — e.g. " +
+        '*"drank my water and prayed"*. You can mention several at once.',
+    )
+    .addFields(
+      {
+        name: "📋 Commands",
+        value: [
+          "• `summary` / `status` — today's progress (done + what's left)",
+          "• `undo <habit>` — remove today's check-off, e.g. `undo water`",
+          "• `audible` — check today's Audible minutes, auto-check reading at 30 min",
+          "• `help` — this message",
+        ].join("\n"),
+      },
+      {
+        name: "⏰ Schedule",
+        value:
+          `Daily check-in at **${dailyTime}**, plus an evening nudge at ` +
+          `**${reminderTime}** if you're not done. 🔥`,
+      },
+    )
+    .setFooter({ text: FOOTER });
+  return { embeds: [embed] };
+};
 
-export const buildDailyPrompt = (userId: string, tz: string): string => {
+export const buildDailyPrompt = (userId: string, tz: string): BotMessage => {
   const state = store.load();
   const lines = habits.map((h) => {
     const eff = store.effectiveStreak(state.habits[h.id], tz);
     const tail = eff > 0 ? `${fireEmoji(eff)} — keep it alive!` : "start a streak today";
     return `${h.emoji} **${h.name}** — ${tail}`;
   });
-  return (
-    `<@${userId}> ☀️ **Daily check-in** — what did you get done today?\n` +
-    `Reply and I'll check things off.\n\n` +
-    lines.join("\n")
-  );
+  const embed = card(COLORS.daily, "☀️ Daily Check-In")
+    .setDescription("What did you get done today? Reply and I'll check things off.")
+    .addFields({ name: "🔥 Today's Habits", value: lines.join("\n") })
+    .setFooter({ text: FOOTER });
+  return { content: `<@${userId}>`, embeds: [embed] };
 };
 
 // Habits not yet completed today, in list order.
@@ -100,17 +146,22 @@ export const remainingHabits = (tz: string): Habit[] => {
   });
 };
 
-export const buildReminder = (userId: string, remaining: Habit[]): string => {
-  const lines = remaining.map((h) => `${h.emoji} ${h.name}`);
-  return (
-    `<@${userId}> ⏰ **Evening nudge** — ${remaining.length} left to finish today:\n\n` +
-    lines.join("\n") +
-    `\n\nReply with what you knocked out and I'll check them off. 💪`
-  );
+export const buildReminder = (userId: string, remaining: Habit[]): BotMessage => {
+  const embed = card(COLORS.nudge, "⏰ Evening Nudge")
+    .setDescription(
+      `**${remaining.length} left** to finish today. Reply with what you knocked ` +
+        "out and I'll check them off. 💪",
+    )
+    .addFields({
+      name: "⬜ Still to do",
+      value: remaining.map((h) => `${h.emoji} ${h.name}`).join("\n"),
+    })
+    .setFooter({ text: FOOTER });
+  return { content: `<@${userId}>`, embeds: [embed] };
 };
 
 // On-demand progress report: what's done today (with streaks) and what's left.
-export const buildSummary = (tz: string): string => {
+export const buildSummary = (tz: string): BotMessage => {
   const state = store.load();
   const today = store.todayStr(tz);
 
@@ -122,16 +173,26 @@ export const buildSummary = (tz: string): string => {
     else left.push(h);
   }
 
-  const header = `📋 **Today's summary** — ${done.length}/${habits.length} done`;
+  const embed = card(COLORS.summary, "📋 Today's Summary")
+    .setDescription(`**${done.length}/${habits.length}** habits done today.`)
+    .setFooter({ text: FOOTER });
 
-  const doneBlock = done.length
-    ? "\n\n**✅ Done**\n" +
-      done.map((h) => `${h.emoji} ${h.name} (🔥 ${state.habits[h.id].currentStreak})`).join("\n")
-    : "";
+  if (done.length) {
+    embed.addFields({
+      name: "✅ Done",
+      value: done
+        .map((h) => `${h.emoji} ${h.name} (🔥 ${state.habits[h.id].currentStreak})`)
+        .join("\n"),
+    });
+  }
+  if (left.length) {
+    embed.addFields({
+      name: `⬜ Left (${left.length})`,
+      value: left.map((h) => `${h.emoji} ${h.name}`).join("\n"),
+    });
+  } else {
+    embed.addFields({ name: "🎉 All done!", value: "Everything's done for today — nice work!" });
+  }
 
-  const leftBlock = left.length
-    ? `\n\n**⬜ Left (${left.length})**\n` + left.map((h) => `${h.emoji} ${h.name}`).join("\n")
-    : "\n\n🎉 Everything's done for today — nice work!";
-
-  return header + doneBlock + leftBlock;
+  return { embeds: [embed] };
 };

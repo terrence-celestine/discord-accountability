@@ -17,6 +17,10 @@ import {
   buildReminder,
   buildSummary,
   buildHelp,
+  card,
+  simpleCard,
+  COLORS,
+  BotMessage,
 } from "./logic";
 import * as store from "./store";
 import * as audible from "./audible";
@@ -56,13 +60,14 @@ const client = new Client({
   ],
 });
 
-const sendMessage = async (content: string): Promise<void> => {
+const sendMessage = async (payload: BotMessage): Promise<void> => {
   const channel = await client.channels.fetch(CHANNEL_ID);
   if (!channel?.isTextBased()) {
     throw new Error(`Channel ${CHANNEL_ID} is not a text channel the bot can post in.`);
   }
   await (channel as TextChannel).send({
-    content,
+    content: payload.content,
+    embeds: payload.embeds,
     allowedMentions: { users: [USER_ID] }, // only ping the one user
   });
 };
@@ -107,7 +112,11 @@ client.once(Events.ClientReady, (c) => {
         const r = await audible.pollAudible(TZ, READING_MINUTES);
         if (r.checkedOff) {
           await sendMessage(
-            `📖 Auto-checked off **reading** — ${Math.round(r.minutesToday)} min on Audible today. 🎧`,
+            simpleCard(
+              COLORS.done,
+              "🎧 Audible → Reading",
+              `Auto-checked off **reading** — ${Math.round(r.minutesToday)} min on Audible today. 🔥 ${r.currentStreak}`,
+            ),
           );
           console.log(`[audible] checked off reading (${Math.round(r.minutesToday)} min today).`);
         }
@@ -140,7 +149,7 @@ client.on(Events.MessageCreate, async (message: Message) => {
   // "help" command → explain the bot and list the commands.
   if (/^[!\/]?help$/.test(lower)) {
     await message.reply({
-      content: buildHelp(DAILY_TIME, REMINDER_TIME),
+      embeds: buildHelp(DAILY_TIME, REMINDER_TIME).embeds,
       allowedMentions: { repliedUser: false },
     });
     return;
@@ -149,7 +158,7 @@ client.on(Events.MessageCreate, async (message: Message) => {
   // "summary" / "status" command → report today's progress on demand.
   if (/^[!\/]?(summary|status)$/.test(lower)) {
     await message.reply({
-      content: buildSummary(TZ),
+      embeds: buildSummary(TZ).embeds,
       allowedMentions: { repliedUser: false },
     });
     return;
@@ -162,7 +171,7 @@ client.on(Events.MessageCreate, async (message: Message) => {
     const arg = undoMatch[1].trim();
     if (!arg) {
       await message.reply({
-        content: "Which habit should I undo? e.g. `undo water`",
+        embeds: simpleCard(COLORS.undo, "↩️ Undo", "Which habit should I undo? e.g. `undo water`").embeds,
         allowedMentions: { repliedUser: false },
       });
       return;
@@ -170,7 +179,11 @@ client.on(Events.MessageCreate, async (message: Message) => {
     const targets = matchedHabits(arg);
     if (targets.length === 0) {
       await message.reply({
-        content: "I couldn't tell which habit that is — try `undo <habit keyword>`.",
+        embeds: simpleCard(
+          COLORS.undo,
+          "↩️ Undo",
+          "I couldn't tell which habit that is — try `undo <habit keyword>`.",
+        ).embeds,
         allowedMentions: { repliedUser: false },
       });
       return;
@@ -183,8 +196,9 @@ client.on(Events.MessageCreate, async (message: Message) => {
       const streak = res.currentStreak > 0 ? fireEmoji(res.currentStreak) : "no active streak";
       return `${habit.emoji} **${habit.name}** unchecked — ${streak}`;
     });
+    const undoEmbed = card(COLORS.undo, "↩️ Undo").setDescription(lines.join("\n"));
     await message.reply({
-      content: lines.join("\n"),
+      embeds: [undoEmbed],
       allowedMentions: { repliedUser: false },
     });
     return;
@@ -194,7 +208,7 @@ client.on(Events.MessageCreate, async (message: Message) => {
   if (/^[!\/]?(audible|listened|listening)$/.test(lower)) {
     if (!audible.isConfigured()) {
       await message.reply({
-        content: "🎧 Audible isn't set up — no credentials configured.",
+        embeds: simpleCard(COLORS.audible, "🎧 Audible", "Audible isn't set up — no credentials configured.").embeds,
         allowedMentions: { repliedUser: false },
       });
       return;
@@ -203,20 +217,26 @@ client.on(Events.MessageCreate, async (message: Message) => {
     try {
       const r = await audible.pollAudible(TZ, READING_MINUTES);
       const mins = Math.round(r.minutesToday);
-      let content: string;
+      let color: number = COLORS.audible;
+      let description: string;
       if (r.checkedOff) {
-        content = `🎧 ${mins} min on Audible today — **reading checked off!** 🔥 ${r.currentStreak}`;
+        color = COLORS.done;
+        description = `${mins} min on Audible today — **reading checked off!** 🔥 ${r.currentStreak}`;
       } else if (r.done) {
-        content = `🎧 ${mins} min on Audible today — reading's already done today. ✅`;
+        color = COLORS.done;
+        description = `${mins} min on Audible today — reading's already done today. ✅`;
       } else {
         const left = Math.max(0, READING_MINUTES - mins);
-        content = `🎧 ${mins} min on Audible today — ${left} more to hit ${READING_MINUTES}. 📖`;
+        description = `${mins} min on Audible today — ${left} more to hit ${READING_MINUTES}. 📖`;
       }
-      await message.reply({ content, allowedMentions: { repliedUser: false } });
+      await message.reply({
+        embeds: simpleCard(color, "🎧 Audible", description).embeds,
+        allowedMentions: { repliedUser: false },
+      });
     } catch (err) {
       console.error("[audible] command failed:", err);
       await message.reply({
-        content: "🎧 Couldn't reach Audible right now — try again in a bit.",
+        embeds: simpleCard(COLORS.audible, "🎧 Audible", "Couldn't reach Audible right now — try again in a bit.").embeds,
         allowedMentions: { repliedUser: false },
       });
     }
@@ -243,9 +263,12 @@ client.on(Events.MessageCreate, async (message: Message) => {
   } catch {
     /* reacting is best-effort */
   }
-  const lead = anyNew ? "Nice work! " : "";
+  const embed = card(
+    anyNew ? COLORS.done : COLORS.summary,
+    anyNew ? "✅ Nice work!" : "✅ Already logged",
+  ).setDescription(parts.join("\n"));
   await message.reply({
-    content: lead + parts.join("\n"),
+    embeds: [embed],
     allowedMentions: { repliedUser: false },
   });
 });
