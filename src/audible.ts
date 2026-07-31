@@ -94,7 +94,8 @@ export const computeMinutesToday = (
 
 export interface AudiblePollResult {
   minutesToday: number;
-  checkedOff: boolean; // true only on the transition to done today (so we announce once)
+  checkedOff: boolean; // transition to done on this poll (so we announce once)
+  done: boolean; // reading is complete today (either just now or already)
   currentStreak: number;
 }
 
@@ -105,7 +106,7 @@ export const pollAudible = async (
   thresholdMinutes: number,
 ): Promise<AudiblePollResult> => {
   const creds = loadCredentials();
-  if (!creds) return { minutesToday: 0, checkedOff: false, currentStreak: 0 };
+  if (!creds) return { minutesToday: 0, checkedOff: false, done: false, currentStreak: 0 };
 
   const api = await importAudibleApi();
   const { items, credentials } = await api.library(creds);
@@ -116,9 +117,16 @@ export const pollAudible = async (
   const { minutesToday, next } = computeMinutesToday(store.getAudibleState(), currentTotal, today);
   store.setAudibleState(next);
 
-  if (minutesToday < thresholdMinutes) {
-    return { minutesToday, checkedOff: false, currentStreak: 0 };
+  if (minutesToday >= thresholdMinutes) {
+    const res = store.checkOff(READING_HABIT_ID, tz);
+    return { minutesToday, checkedOff: !res.alreadyDone, done: true, currentStreak: res.currentStreak };
   }
-  const res = store.checkOff(READING_HABIT_ID, tz);
-  return { minutesToday, checkedOff: !res.alreadyDone, currentStreak: res.currentStreak };
+  // Under threshold — report whether reading is already done (e.g. checked off another way).
+  const hs = store.load().habits[READING_HABIT_ID];
+  return {
+    minutesToday,
+    checkedOff: false,
+    done: hs?.lastCompletedDate === today,
+    currentStreak: hs?.currentStreak ?? 0,
+  };
 };

@@ -70,6 +70,7 @@ export const buildHelp = (dailyTime: string, reminderTime: string): string =>
     "**Commands**",
     "• `summary` / `status` — today's progress (done + what's left)",
     "• `undo <habit>` — remove today's check-off, e.g. `undo water`",
+    "• `audible` — check your Audible minutes today and auto-check reading at 30 min",
     "• `help` — this message",
     "",
     `I post a check-in daily at ${dailyTime} and a nudge at ${reminderTime} if you're not done. 🔥`,

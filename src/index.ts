@@ -190,6 +190,39 @@ client.on(Events.MessageCreate, async (message: Message) => {
     return;
   }
 
+  // "audible" / "listened" command → check Audible minutes now and check off reading at 30.
+  if (/^[!\/]?(audible|listened|listening)$/.test(lower)) {
+    if (!audible.isConfigured()) {
+      await message.reply({
+        content: "🎧 Audible isn't set up — no credentials configured.",
+        allowedMentions: { repliedUser: false },
+      });
+      return;
+    }
+    if ("sendTyping" in message.channel) await message.channel.sendTyping().catch(() => {});
+    try {
+      const r = await audible.pollAudible(TZ, READING_MINUTES);
+      const mins = Math.round(r.minutesToday);
+      let content: string;
+      if (r.checkedOff) {
+        content = `🎧 ${mins} min on Audible today — **reading checked off!** 🔥 ${r.currentStreak}`;
+      } else if (r.done) {
+        content = `🎧 ${mins} min on Audible today — reading's already done today. ✅`;
+      } else {
+        const left = Math.max(0, READING_MINUTES - mins);
+        content = `🎧 ${mins} min on Audible today — ${left} more to hit ${READING_MINUTES}. 📖`;
+      }
+      await message.reply({ content, allowedMentions: { repliedUser: false } });
+    } catch (err) {
+      console.error("[audible] command failed:", err);
+      await message.reply({
+        content: "🎧 Couldn't reach Audible right now — try again in a bit.",
+        allowedMentions: { repliedUser: false },
+      });
+    }
+    return;
+  }
+
   const matched = matchedHabits(message.content);
   if (matched.length === 0) return; // just chatting; stay quiet
 

@@ -113,6 +113,7 @@ test("buildHelp lists the commands and the configured schedule times", () => {
   const msg = buildHelp("12:00", "19:00");
   expect(msg).toMatch(/summary.*status/);
   expect(msg).toContain("undo <habit>");
+  expect(msg).toContain("audible");
   expect(msg).toContain("help");
   expect(msg).toContain("12:00");
   expect(msg).toContain("19:00");
