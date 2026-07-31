@@ -13,6 +13,8 @@
 //
 // A single reply can check off several habits at once, e.g. "drank my water and prayed".
 
+import * as store from "./store";
+
 export interface Habit {
   id: string;
   name: string;
@@ -20,6 +22,11 @@ export interface Habit {
   keywords: string[];
 }
 
+// The default icon a custom habit gets when the user doesn't supply an emoji.
+export const DEFAULT_HABIT_EMOJI = "📌";
+
+// The built-in habits. These always exist; custom habits (added via /add_habit)
+// are stored separately and merged in by allHabits().
 export const habits: Habit[] = [
   {
     id: "water",
@@ -100,3 +107,96 @@ export const habits: Habit[] = [
     keywords: ["steps", "10k", "10k steps", "10,000 steps"],
   },
 ];
+
+// ---------- dynamic registry (built-ins + custom) ----------
+
+// Every place that iterates habits should use this, not the static `habits`
+// array, so user-added habits are tracked everywhere (daily prompt, summary,
+// keyword matching, undo). Custom habits are appended after the built-ins.
+export const allHabits = (): Habit[] => [...habits, ...store.getCustomHabits()];
+
+export const findHabit = (id: string): Habit | undefined =>
+  allHabits().find((h) => h.id === id);
+
+// ---------- adding a custom habit ----------
+
+// Short words we don't want to become check-off keywords on their own.
+const STOPWORDS = new Set([
+  "the", "a", "an", "and", "or", "of", "to", "my", "for", "in", "on", "at",
+  "with", "do", "did", "get", "got", "some", "your", "you",
+]);
+
+// Turn a name into a stable id fragment: lowercase, non-alphanumerics → "_".
+export const slugify = (name: string): string =>
+  name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 40);
+
+// Derive check-off keywords from a habit name: the whole phrase, plus each
+// meaningful word (≥3 chars, not a stopword). Lets you check it off by typing
+// the name or any significant word from it.
+export const deriveKeywords = (name: string): string[] => {
+  const phrase = name.toLowerCase().trim();
+  const words = phrase.split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !STOPWORDS.has(w));
+  return Array.from(new Set([phrase, ...words])).filter(Boolean);
+};
+
+// Pull an optional leading emoji off the input, e.g. "🧴 Moisturize" →
+// { emoji: "🧴", name: "Moisturize" }. Handles multi-codepoint emoji (ZWJ
+// sequences, skin-tone/variation modifiers). No leading emoji → default icon.
+export const parseHabitInput = (arg: string): { emoji?: string; name: string } => {
+  const trimmed = arg.trim();
+  // A leading emoji: one pictographic base plus any ZWJ joins, variation
+  // selectors, skin-tone modifiers, or keycap combiners, then whitespace + name.
+  const m =
+    /^(\p{Extended_Pictographic}[\p{Extended_Pictographic}‍️\u{1F3FB}-\u{1F3FF}⃣]*)\s+(.+)$/u.exec(
+      trimmed,
+    );
+  if (m && m[2].trim()) return { emoji: m[1], name: m[2].trim() };
+  return { name: trimmed };
+};
+
+export interface AddHabitResult {
+  ok: boolean;
+  habit?: Habit;
+  error?: string;
+}
+
+// Validate, build, and persist a custom habit from raw "/add_habit" input.
+// Pure enough to unit-test (it only touches store, which is DATA_DIR-backed).
+export const addHabitFromInput = (arg: string): AddHabitResult => {
+  const { emoji, name: rawName } = parseHabitInput(arg);
+  const name = rawName.replace(/\s+/g, " ").trim();
+
+  if (!name) {
+    return { ok: false, error: "Give the habit a name — e.g. `/add_habit Stretch for 5 minutes`." };
+  }
+  if (name.length > 80) {
+    return { ok: false, error: "That name's too long — keep it under 80 characters." };
+  }
+
+  const slug = slugify(name);
+  if (!slug) {
+    return { ok: false, error: "That name has no letters or numbers I can use — try a plain name." };
+  }
+
+  const id = `custom_${slug}`;
+  const clash = allHabits().find(
+    (h) => h.id === id || h.name.toLowerCase() === name.toLowerCase(),
+  );
+  if (clash) {
+    return { ok: false, error: `${clash.emoji} **${clash.name}** is already a habit.` };
+  }
+
+  const habit: Habit = {
+    id,
+    name,
+    emoji: emoji?.trim() || DEFAULT_HABIT_EMOJI,
+    keywords: deriveKeywords(name),
+  };
+  store.addCustomHabit(habit);
+  return { ok: true, habit };
+};

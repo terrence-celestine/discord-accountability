@@ -6,7 +6,7 @@
 
 import { EmbedBuilder } from "discord.js";
 
-import { habits, Habit } from "./habits";
+import { allHabits, Habit } from "./habits";
 import * as store from "./store";
 
 // ---------- keyword matching ----------
@@ -28,7 +28,7 @@ const negatedBefore = (text: string, index: number): boolean => {
 export const matchedHabits = (rawContent: string): Habit[] => {
   const text = rawContent.toLowerCase();
   const matched: Habit[] = [];
-  for (const habit of habits) {
+  for (const habit of allHabits()) {
     const hit = habit.keywords.some((kw) => {
       const re = new RegExp(`\\b${escapeRegExp(kw.toLowerCase())}\\b`, "g");
       let m: RegExpExecArray | null;
@@ -106,6 +106,7 @@ export const buildHelp = (dailyTime: string, reminderTime: string): BotMessage =
         name: "📋 Commands",
         value: [
           "• `summary` / `status` — today's progress (done + what's left)",
+          "• `add_habit <name>` — track a new habit, e.g. `add_habit 🧴 Moisturize`",
           "• `undo <habit>` — remove today's check-off, e.g. `undo water`",
           "• `audible` — check today's Audible minutes, auto-check reading at 30 min",
           "• `help` — this message",
@@ -124,7 +125,7 @@ export const buildHelp = (dailyTime: string, reminderTime: string): BotMessage =
 
 export const buildDailyPrompt = (userId: string, tz: string): BotMessage => {
   const state = store.load();
-  const lines = habits.map((h) => {
+  const lines = allHabits().map((h) => {
     const eff = store.effectiveStreak(state.habits[h.id], tz);
     const tail = eff > 0 ? `${fireEmoji(eff)} — keep it alive!` : "start a streak today";
     return `${h.emoji} **${h.name}** — ${tail}`;
@@ -140,7 +141,7 @@ export const buildDailyPrompt = (userId: string, tz: string): BotMessage => {
 export const remainingHabits = (tz: string): Habit[] => {
   const state = store.load();
   const today = store.todayStr(tz);
-  return habits.filter((h) => {
+  return allHabits().filter((h) => {
     const hs = state.habits[h.id];
     return !hs || hs.lastCompletedDate !== today;
   });
@@ -165,16 +166,17 @@ export const buildSummary = (tz: string): BotMessage => {
   const state = store.load();
   const today = store.todayStr(tz);
 
+  const tracked = allHabits();
   const done: Habit[] = [];
   const left: Habit[] = [];
-  for (const h of habits) {
+  for (const h of tracked) {
     const hs = state.habits[h.id];
     if (hs && hs.lastCompletedDate === today) done.push(h);
     else left.push(h);
   }
 
   const embed = card(COLORS.summary, "📋 Today's Summary")
-    .setDescription(`**${done.length}/${habits.length}** habits done today.`)
+    .setDescription(`**${done.length}/${tracked.length}** habits done today.`)
     .setFooter({ text: FOOTER });
 
   if (done.length) {

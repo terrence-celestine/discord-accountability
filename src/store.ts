@@ -8,6 +8,8 @@
 import fs from "fs";
 import path from "path";
 
+import type { Habit } from "./habits"; // type-only — erased at compile, so no runtime import cycle
+
 const dataDir = (): string => process.env.DATA_DIR || "/data";
 
 export const statePath = (): string => path.join(dataDir(), "state.json");
@@ -28,6 +30,7 @@ export interface AudibleState {
 export interface State {
   habits: Record<string, HabitState>;
   audible?: AudibleState;
+  customHabits?: Habit[]; // user-defined habits added at runtime via /add_habit
 }
 
 export interface CheckOffResult {
@@ -167,4 +170,28 @@ export const setAudibleState = (audible: AudibleState): void => {
   const s = load();
   s.audible = audible;
   save(s);
+};
+
+// ---------- custom habits ----------
+
+export const getCustomHabits = (): Habit[] => load().customHabits ?? [];
+
+// Append a custom habit. The caller (habits.addHabitFromInput) is responsible for
+// validation and dedup; this just persists.
+export const addCustomHabit = (habit: Habit): void => {
+  const s = load();
+  s.customHabits = [...(s.customHabits ?? []), habit];
+  save(s);
+};
+
+// Remove a custom habit by id. Returns true if one was removed. Its streak state
+// (state.habits[id]) is intentionally left in place, so re-adding restores history.
+export const removeCustomHabit = (id: string): boolean => {
+  const s = load();
+  const before = s.customHabits ?? [];
+  const after = before.filter((h) => h.id !== id);
+  if (after.length === before.length) return false;
+  s.customHabits = after;
+  save(s);
+  return true;
 };

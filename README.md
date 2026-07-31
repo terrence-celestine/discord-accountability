@@ -8,8 +8,8 @@ each habit by keyword, checks it off for the day, and tracks a **streak per habi
 - **Multiple named habits**, each with its own streak (edit `src/habits.ts`).
 - **Keyword detection** with a basic negation guard ("didn't shower" won't count).
 - **Persistent** — streaks are saved to `state.json` and survive restarts/redeploys.
-- **Chat commands** — `summary` / `status` (today's progress), `undo <habit>` (reverse an
-  accidental check-off), and `help` (list the commands).
+- **Chat commands** — `summary` / `status` (today's progress), `add_habit <name>` (track a
+  custom habit), `undo <habit>` (reverse an accidental check-off), and `help` (list the commands).
 - **Audible auto-check-off** (optional) — the Reading habit checks itself off once you've
   listened ≥30 min on Audible that day. See [Audible integration](#audible-integration-optional).
 - Written in **TypeScript** (compiled to `dist/` with `tsc`).
@@ -151,6 +151,11 @@ streaks across deploys.
 - **Commands** (optionally prefixed with `!` or `/`):
   - **`summary`** / **`status`** — on-demand report of today's progress (done habits with their
     streaks, plus what's left).
+  - **`add_habit <name>`** — start tracking a custom habit, with an optional leading emoji
+    (e.g. `add_habit 🧴 Moisturize`). Without an emoji it gets a default icon (📌). Keywords for
+    checking it off are derived from the name (the whole phrase plus each meaningful word), and it
+    joins the daily check-in, summary, and nudge immediately. Custom habits are persisted in
+    `DATA_DIR/state.json`.
   - **`undo <habit>`** — reverse today's check-off for a habit (e.g. `undo water`, or
     `undo water and pray` for several). Steps the streak back; leaves your all-time best intact.
   - **`help`** — lists the commands and how check-off works.

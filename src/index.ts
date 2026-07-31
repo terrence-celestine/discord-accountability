@@ -22,6 +22,7 @@ import {
   COLORS,
   BotMessage,
 } from "./logic";
+import { addHabitFromInput } from "./habits";
 import * as store from "./store";
 import * as audible from "./audible";
 
@@ -161,6 +162,30 @@ client.on(Events.MessageCreate, async (message: Message) => {
       embeds: buildSummary(TZ).embeds,
       allowedMentions: { repliedUser: false },
     });
+    return;
+  }
+
+  // "add_habit <name>" command → create a custom habit. Accepts "/add_habit",
+  // "!add_habit", "add habit", or "addhabit", with an optional leading emoji.
+  // Must run BEFORE keyword check-off so the habit name in the arg isn't matched.
+  const addMatch = /^[!\/]?add[ _]?habit\b(.*)/i.exec(trimmed);
+  if (addMatch) {
+    const res = addHabitFromInput(addMatch[1]);
+    if (!res.ok) {
+      await message.reply({
+        embeds: simpleCard(COLORS.undo, "➕ Add Habit", res.error!).embeds,
+        allowedMentions: { repliedUser: false },
+      });
+      return;
+    }
+    const h = res.habit!;
+    const embed = card(COLORS.done, "➕ Habit Added")
+      .setDescription(`${h.emoji} **${h.name}** is now being tracked.`)
+      .addFields({
+        name: "✅ Check it off by saying",
+        value: h.keywords.map((k) => `\`${k}\``).join(", "),
+      });
+    await message.reply({ embeds: [embed], allowedMentions: { repliedUser: false } });
     return;
   }
 
