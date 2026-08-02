@@ -5,6 +5,7 @@
 // checked off for the day and its streak is updated. A later "nudge" fires only
 // if the day's list isn't complete. All the decision logic lives in logic.ts.
 
+import http from "node:http";
 import cron from "node-cron";
 import {
   Client,
@@ -40,6 +41,8 @@ import {
 import { addHabitFromInput, findHabit, SLOTS, TimeSlot } from "./habits";
 import * as store from "./store";
 import * as audible from "./audible";
+import * as ingest from "./ingest";
+import { createIngestListener } from "./http";
 
 // ---------- config / env ----------
 
@@ -67,6 +70,11 @@ const SLOT_TIMES: Record<TimeSlot, string> = {
 const REMINDER_TIME = process.env.REMINDER_TIME ?? "20:00"; // end-of-day nudge, only if the list isn't complete
 const SEND_NOW = process.env.SEND_NOW; // "1" → fire one prompt immediately at startup (testing)
 const READING_MINUTES = Number(process.env.READING_MINUTES ?? "30"); // Audible threshold for auto-check-off
+
+// Samsung Health ingest: the HTTP endpoints only start if INGEST_TOKEN is set
+// (inert otherwise, like the Audible integration). PORT is injected by Railway.
+const INGEST_TOKEN = process.env.INGEST_TOKEN;
+const PORT = Number(process.env.PORT ?? "3000");
 
 // Fail fast at startup if any schedule time is malformed.
 const slotExprs: Record<TimeSlot, string> = {
@@ -133,6 +141,45 @@ const sendReminderIfIncomplete = async (): Promise<void> => {
   }
 };
 
+// ---------- Samsung Health ingest HTTP server ----------
+
+// Announce each newly-completed metric in Discord (once — only when checkedOff).
+const announceIngest = async (results: ingest.MetricResult[]): Promise<void> => {
+  for (const r of results) {
+    if (!r.checkedOff) continue;
+    const value = Number.isInteger(r.valueToday) ? r.valueToday : Number(r.valueToday.toFixed(2));
+    try {
+      await sendMessage(
+        simpleCard(
+          COLORS.done,
+          `📲 Samsung Health → ${r.name}`,
+          `Auto-checked off ${r.emoji} **${r.name}** — ${value}/${r.goal} ${r.unit} today. ${fireEmoji(r.currentStreak)}`,
+        ),
+      );
+    } catch (err) {
+      console.error("Failed to announce ingest check-off:", err);
+    }
+  }
+};
+
+// Start the ingest listener — but only when a token is configured, so existing
+// deploys that don't set INGEST_TOKEN keep running as a pure background worker.
+// The request handling lives in ./http; here we just inject the Discord announce.
+const startIngestServer = (): void => {
+  if (!INGEST_TOKEN) {
+    console.log("Samsung Health ingest disabled (no INGEST_TOKEN).");
+    return;
+  }
+  const listener = createIngestListener({
+    token: INGEST_TOKEN,
+    tz: TZ,
+    onResults: (results) => void announceIngest(results),
+  });
+  http.createServer(listener).listen(PORT, () =>
+    console.log(`Samsung Health ingest listening on :${PORT}`),
+  );
+};
+
 client.once(Events.ClientReady, (c) => {
   console.log(`Logged in as ${c.user.tag}`);
 
@@ -171,6 +218,10 @@ client.once(Events.ClientReady, (c) => {
   } else {
     console.log("Audible integration disabled (no credentials).");
   }
+
+  // Samsung Health ingest endpoints (only if INGEST_TOKEN is set). Started here so
+  // the Discord client is ready before any push triggers an auto-check-off post.
+  startIngestServer();
 
   if (SEND_NOW === "1") {
     console.log("SEND_NOW=1 → sending one prompt now.");

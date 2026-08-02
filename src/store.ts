@@ -27,9 +27,20 @@ export interface AudibleState {
   lastTotal: number; // most recent observed total (used to anchor the next day)
 }
 
+// The most recent Samsung Health values pushed for a single local day. Values are
+// today's totals (they reset each day), so `date` scopes them — a stale date means
+// nothing has been reported yet today.
+export interface HealthState {
+  date: string | null; // local date these values belong to
+  steps?: number;
+  waterGallons?: number;
+  meditationMinutes?: number;
+}
+
 export interface State {
   habits: Record<string, HabitState>;
   audible?: AudibleState;
+  health?: HealthState; // latest pushed Samsung Health values for the current day
   customHabits?: Habit[]; // user-defined habits added at runtime via /add_habit
 }
 
@@ -170,6 +181,26 @@ export const setAudibleState = (audible: AudibleState): void => {
   const s = load();
   s.audible = audible;
   save(s);
+};
+
+// ---------- Samsung Health snapshot (latest pushed values for today) ----------
+
+// Today's pushed values, or empty values if nothing's been reported today yet.
+// Anything dated before `tz`'s today is treated as reset (the metrics are daily).
+export const getHealth = (tz: string): HealthState => {
+  const h = load().health;
+  if (!h || h.date !== todayStr(tz)) return { date: todayStr(tz) };
+  return h;
+};
+
+// Merge new values into today's snapshot (partial pushes are fine), stamped with today.
+export const setHealth = (values: Omit<HealthState, "date">, tz: string): HealthState => {
+  const current = getHealth(tz);
+  const next: HealthState = { ...current, ...values, date: todayStr(tz) };
+  const s = load();
+  s.health = next;
+  save(s);
+  return next;
 };
 
 // ---------- custom habits ----------

@@ -10,7 +10,8 @@
     "typecheck": "tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "setup:audible": "tsc && node --env-file=.env dist/audible-setup.js"
+    "setup:audible": "tsc && node --env-file=.env dist/audible-setup.js",
+    "serve:ingest": "tsc && node dist/serve-ingest.js"
   },
   "engines": {
     "node": ">=20.6"

@@ -15,6 +15,8 @@ and tracks a **streak per habit**.
   custom habit), `undo <habit>` (reverse an accidental check-off), and `help` (list the commands).
 - **Audible auto-check-off** (optional) — the Reading habit checks itself off once you've
   listened ≥30 min on Audible that day. See [Audible integration](#audible-integration-optional).
+- **Samsung Health ingest** (optional) — push steps/water/meditation over HTTP and the matching
+  habits auto-check when you hit the day's goal. See [Samsung Health ingest](#samsung-health-ingest-optional).
 - Written in **TypeScript** (compiled to `dist/` with `tsc`).
 
 ## How it works
@@ -31,7 +33,9 @@ Content Intent**), not just a webhook. So this is a small always-on `discord.js`
 | `src/store.ts` | Streak state + math, saved to `state.json`. |
 | `src/audible.ts` | Optional Audible integration: derives minutes listened, auto-checks off Reading. |
 | `src/audible-setup.ts` | One-time local login (`npm run setup:audible`) to generate Audible credentials. |
-| `test/` | Vitest suite (`*.test.ts`) covering `logic.ts`, `store.ts`, and `audible.ts`. |
+| `src/ingest.ts` | Samsung Health ingest logic: maps pushed steps/water/meditation to habit check-offs. |
+| `src/http.ts` | The `POST /ingest` + `GET /status` request handler (no Discord dep, unit-tested). |
+| `test/` | Vitest suite (`*.test.ts`) covering `logic.ts`, `store.ts`, `audible.ts`, `ingest.ts`, and `http.ts`. |
 | `tsconfig.json` | TypeScript compiler config (`src/` → `dist/`). |
 | `railway.json` | Railway deploy config (always-on service). |
 | `.env.example` | The env vars you need to set. |
@@ -122,6 +126,45 @@ and prints a listening-time sanity check so you can confirm the numbers look rig
 tokens from then on** — no recurring re-login. Optionally set `AUDIBLE_LOCALE` (default `com`)
 and `READING_MINUTES` (default `30`).
 
+## Samsung Health ingest (optional)
+
+Push your **steps, water, and meditation** into the bot over HTTP and it auto-checks off the
+matching habits (`steps`, `water`, `meditate`) when you hit the day's goal — the same way Audible
+auto-checks reading, but *pushed* from a phone automation (Bixby routine, Tasker, Health Sync, an
+Automate flow, etc.) instead of polled.
+
+It's fully optional: leave **`INGEST_TOKEN`** unset and no server starts. Set it and the bot
+exposes two authenticated endpoints plus an unauthenticated health check.
+
+**Endpoints** (both require `Authorization: Bearer <INGEST_TOKEN>`):
+
+- **`POST /ingest`** — body is JSON with any of the three metrics (today's totals):
+  ```json
+  { "steps": 10500, "water": 1, "meditation": 12 }
+  ```
+  `water` is in **gallons**, `meditation` in **minutes**. Each metric that meets its goal is
+  checked off (idempotently — re-posting the same day won't double-count), and a Discord card is
+  posted for anything newly completed. Responds with per-metric results.
+- **`GET /status`** — today's progress for all three metrics (value, goal, done, streak) as JSON.
+- **`GET /healthz`** — unauthenticated `200 ok`, for platform liveness checks.
+
+**Goals** (env vars, with defaults): `STEPS_GOAL=10000`, `WATER_GOAL_GALLONS=1`,
+`MEDITATION_MINUTES=1` (any logged session). Pushed values are treated as **that day's totals**
+(they reset daily) and stored per-day so `/status` can show progress.
+
+**Try it locally:** set `INGEST_TOKEN` and `DATA_DIR=./data` in `.env`, `npm run dev`, then:
+
+```bash
+curl -s -X POST localhost:3000/ingest \
+  -H "Authorization: Bearer $INGEST_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"steps":10500,"water":1,"meditation":12}'
+```
+
+**For Railway:** set `INGEST_TOKEN` (a long random secret) in the service Variables, then enable a
+public URL under **Service → Settings → Networking → Generate Domain** so your phone can reach it.
+Railway injects `PORT` automatically; the bot listens on it. Point your phone automation at
+`https://<your-domain>/ingest` with the `Authorization: Bearer` header.
+
 ## 6. Deploy to Railway (always-on)
 
 Railway deploys straight from GitHub and redeploys on every push.
@@ -133,12 +176,16 @@ Railway deploys straight from GitHub and redeploys on every push.
    across deploys.
 4. **Variables** (service → Variables): set `DISCORD_TOKEN`, `CHANNEL_ID`, `USER_ID`, `TZ`,
    `MORNING_TIME`, `AFTERNOON_TIME`, `EVENING_TIME`, `REMINDER_TIME`, and `DATA_DIR=/data`.
-   (Leave `SEND_NOW` unset in production.)
+   (Leave `SEND_NOW` unset in production.) To enable the Samsung Health endpoints, also set
+   `INGEST_TOKEN` (and optionally `STEPS_GOAL` / `WATER_GOAL_GALLONS` / `MEDITATION_MINUTES`) —
+   see [Samsung Health ingest](#samsung-health-ingest-optional).
 
 Build and start are driven by `railway.json`: it runs `npm run build` (compiles `src/` →
 `dist/`) and starts with `node dist/index.js`. **The start command must point at
 `dist/index.js`, not `index.js`** — the source is TypeScript, so the entrypoint only exists
-after the build. This is a background worker with no web server, so no public domain is needed.
+after the build. Without `INGEST_TOKEN` it's a background worker with no web server, so no public
+domain is needed; set `INGEST_TOKEN` and it also serves the ingest endpoints (see that section
+for the one extra Railway step — enabling a public domain).
 
 That's it — the bot stays online and pings you at each slot's time (`MORNING_TIME`,
 `AFTERNOON_TIME`, `EVENING_TIME`) in your `TZ`. Every `git push` to the default branch triggers

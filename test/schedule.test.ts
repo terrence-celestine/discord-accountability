@@ -182,13 +182,19 @@ test("buildSlotSummary celebrates when a slot is fully done", () => {
   expect(text).toMatch(/All done/);
 });
 
+// discord.js's ButtonBuilder#toJSON() is a union whose premium-button member lacks
+// custom_id; in these tests every button is a plain check-off button, so read the
+// fields through a narrow shape.
+const btnJson = (b: { toJSON: () => unknown }): { custom_id?: string; disabled?: boolean } =>
+  b.toJSON() as { custom_id?: string; disabled?: boolean };
+
 test("buildCategoryPrompt attaches a check-off button per habit in the slot", () => {
   const morning = habitsInSlot("morning");
   const msg = buildCategoryPrompt("u1", TZ, "morning");
   const buttons = (msg.components ?? []).flatMap((row) => row.components);
   expect(buttons.length).toBe(morning.length);
   // Every button carries a check:<habitId> customId for a morning habit.
-  const ids = buttons.map((b) => b.toJSON().custom_id);
+  const ids = buttons.map((b) => btnJson(b).custom_id);
   for (const h of morning) expect(ids).toContain(`check:${h.id}`);
 });
 
@@ -198,7 +204,7 @@ test("habitButtons marks done habits as disabled, undone ones as enabled", () =>
   store.save({
     habits: { [doneHabit.id]: { currentStreak: 1, longestStreak: 1, lastCompletedDate: today } },
   });
-  const buttons = habitButtons(morning, TZ).flatMap((row) => row.components.map((b) => b.toJSON()));
+  const buttons = habitButtons(morning, TZ).flatMap((row) => row.components.map((b) => btnJson(b)));
   const doneBtn = buttons.find((b) => b.custom_id === `check:${doneHabit.id}`)!;
   expect(doneBtn.disabled).toBe(true);
   const otherBtn = buttons.find((b) => b.custom_id !== `check:${doneHabit.id}`)!;
