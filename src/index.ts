@@ -165,6 +165,11 @@ const announceIngest = async (results: ingest.MetricResult[]): Promise<void> => 
 // Start the ingest listener — but only when a token is configured, so existing
 // deploys that don't set INGEST_TOKEN keep running as a pure background worker.
 // The request handling lives in ./http; here we just inject the Discord announce.
+//
+// This runs independently of the Discord connection (see the entrypoint below) so
+// the endpoints — including the unauthenticated /healthz probe — stay up even if
+// Discord login is slow or failing. If a push lands before the client is ready, the
+// habit is still checked off; only the Discord announcement no-ops (it's caught).
 const startIngestServer = (): void => {
   if (!INGEST_TOKEN) {
     console.log("Samsung Health ingest disabled (no INGEST_TOKEN).");
@@ -218,10 +223,6 @@ client.once(Events.ClientReady, (c) => {
   } else {
     console.log("Audible integration disabled (no credentials).");
   }
-
-  // Samsung Health ingest endpoints (only if INGEST_TOKEN is set). Started here so
-  // the Discord client is ready before any push triggers an auto-check-off post.
-  startIngestServer();
 
   if (SEND_NOW === "1") {
     console.log("SEND_NOW=1 → sending one prompt now.");
@@ -466,7 +467,14 @@ client.on(Events.MessageCreate, async (message: Message) => {
   });
 });
 
-// Only connect when run directly (production entrypoint), never on import.
+// Only start listeners/connections when run directly (production entrypoint), never
+// on import. The ingest HTTP server starts first and independently of Discord, so the
+// endpoints (and /healthz) are reachable even while the gateway is still connecting.
 if (require.main === module) {
-  client.login(DISCORD_TOKEN);
+  startIngestServer();
+  // Log a login failure instead of letting the rejection crash the process — that
+  // would take the ingest server down with it. The endpoints stay up regardless.
+  client.login(DISCORD_TOKEN).catch((err) => {
+    console.error("Discord login failed (ingest endpoints still running):", err);
+  });
 }
