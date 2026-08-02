@@ -149,6 +149,10 @@ a fresh deploy, and the `/data` volume keeps your streaks across deploys.
 
 ## Notes
 
+- **Check-off buttons** — each slot check-in (and the `morning`/`afternoon`/`evening` commands)
+  renders a tappable button per habit below the message. Tap one to check it off: it turns green
+  ✅ and disables, and you get a private streak confirmation. Buttons and text replies both work;
+  buttons cap at 25 per message, so anything beyond that is still checkable by text.
 - Reply again the same day and it won't double-count ("already checked off").
 - Miss a day and the streak resets to 1 on your next check-in; the daily prompt shows a
   streak as broken once a full day is missed.
@@ -157,6 +161,8 @@ a fresh deploy, and the `/data` volume keeps your streaks across deploys.
 - **Commands** (optionally prefixed with `!` or `/`):
   - **`summary`** / **`status`** — on-demand report of today's progress (done habits with their
     streaks, plus what's left).
+  - **`morning`** / **`afternoon`** / **`evening`** — what's still left to do in that one time
+    slot (plus what's already done there), without the other slots' noise.
   - **`add_habit <slot> <name>`** — start tracking a custom habit in a time slot. The slot
     (`morning` / `afternoon` / `evening`) is **required** and comes first, followed by an optional
     leading emoji (e.g. `add_habit morning 🧴 Moisturize`). Without an emoji it gets a default icon

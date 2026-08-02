@@ -4,7 +4,7 @@
 // state via store), so it's easy to unit-test without a gateway connection.
 // index.ts imports these and wires them to discord.js events.
 
-import { EmbedBuilder } from "discord.js";
+import { EmbedBuilder, ButtonBuilder, ActionRowBuilder, ButtonStyle } from "discord.js";
 
 import { allHabits, habitsInSlot, Habit, TimeSlot } from "./habits";
 import * as store from "./store";
@@ -69,7 +69,46 @@ export const timeToCron = (hhmm: string): string => {
 export interface BotMessage {
   content?: string;
   embeds: EmbedBuilder[];
+  components?: ActionRowBuilder<ButtonBuilder>[];
 }
+
+// ---------- check-off buttons ----------
+//
+// Discord embeds can't hold clickable checkboxes, so each habit gets a real
+// button below the message. A button's customId is `check:<habitId>`; the
+// InteractionCreate handler in index.ts checks it off. Buttons cap at 5 per row
+// and 5 rows (25 total) — plenty for a single slot; anything past that is still
+// checkable by text reply.
+const BUTTONS_PER_ROW = 5;
+const MAX_BUTTON_ROWS = 5;
+
+// Build check-off buttons for a set of habits, reflecting today's done state:
+// done habits are disabled green ✅ buttons, the rest are tappable.
+export const habitButtons = (
+  habitsForSlot: Habit[],
+  tz: string,
+): ActionRowBuilder<ButtonBuilder>[] => {
+  const state = store.load();
+  const today = store.todayStr(tz);
+  const capped = habitsForSlot.slice(0, BUTTONS_PER_ROW * MAX_BUTTON_ROWS);
+
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  for (let i = 0; i < capped.length; i += BUTTONS_PER_ROW) {
+    const row = new ActionRowBuilder<ButtonBuilder>();
+    for (const h of capped.slice(i, i + BUTTONS_PER_ROW)) {
+      const done = state.habits[h.id]?.lastCompletedDate === today;
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`check:${h.id}`)
+          .setLabel(`${done ? "✅" : h.emoji} ${h.name}`.slice(0, 80))
+          .setStyle(done ? ButtonStyle.Success : ButtonStyle.Secondary)
+          .setDisabled(done),
+      );
+    }
+    rows.push(row);
+  }
+  return rows;
+};
 
 // One place for the palette so every card feels like the same product.
 export const COLORS = {
@@ -124,6 +163,7 @@ export const buildHelp = (schedule: HelpSchedule): BotMessage => {
         name: "📋 Commands",
         value: [
           "• `summary` / `status` — today's progress (done + what's left)",
+          "• `morning` / `afternoon` / `evening` — what's left in that slot",
           "• `add_habit <slot> <name>` — track a new habit in a slot, e.g. `add_habit morning 🧴 Moisturize`",
           "• `undo <habit>` — remove today's check-off, e.g. `undo water`",
           "• `audible` — check today's Audible minutes, auto-check reading at 30 min",
@@ -180,7 +220,11 @@ export const buildCategoryPrompt = (userId: string, tz: string, slot: TimeSlot):
     embed.addFields({ name: `🔥 ${info.label} Habits`, value: lines.join("\n") });
   }
 
-  return { content: `<@${userId}>`, embeds: [embed] };
+  return {
+    content: `<@${userId}>`,
+    embeds: [embed],
+    components: slotHabits.length ? habitButtons(slotHabits, tz) : undefined,
+  };
 };
 
 // Habits not yet completed today, in list order.
@@ -243,4 +287,57 @@ export const buildSummary = (tz: string): BotMessage => {
   }
 
   return { embeds: [embed] };
+};
+
+// On-demand progress for a single time slot: what's still to do (and what's done).
+// Backs the `/morning`, `/afternoon`, and `/evening` commands.
+export const buildSlotSummary = (tz: string, slot: TimeSlot): BotMessage => {
+  const info = SLOT_INFO[slot];
+  const state = store.load();
+  const today = store.todayStr(tz);
+
+  const slotHabits = habitsInSlot(slot);
+  const done: Habit[] = [];
+  const left: Habit[] = [];
+  for (const h of slotHabits) {
+    const hs = state.habits[h.id];
+    if (hs && hs.lastCompletedDate === today) done.push(h);
+    else left.push(h);
+  }
+
+  const embed = card(info.color, `${info.emoji} ${info.label} — What's Left`).setFooter({
+    text: FOOTER,
+  });
+
+  if (slotHabits.length === 0) {
+    embed.setDescription(
+      `No **${info.label.toLowerCase()}** habits yet. Add one with \`add_habit ${slot} <name>\`.`,
+    );
+    return { embeds: [embed] };
+  }
+
+  embed.setDescription(`**${done.length}/${slotHabits.length}** ${info.label.toLowerCase()} habits done.`);
+
+  if (left.length) {
+    embed.addFields({
+      name: `⬜ Left (${left.length})`,
+      value: left.map((h) => `${h.emoji} ${h.name}`).join("\n"),
+    });
+  } else {
+    embed.addFields({
+      name: "🎉 All done!",
+      value: `Your ${info.label.toLowerCase()} habits are all done — nice work!`,
+    });
+  }
+
+  if (done.length) {
+    embed.addFields({
+      name: "✅ Done",
+      value: done
+        .map((h) => `${h.emoji} ${h.name} (🔥 ${state.habits[h.id].currentStreak})`)
+        .join("\n"),
+    });
+  }
+
+  return { embeds: [embed], components: habitButtons(slotHabits, tz) };
 };

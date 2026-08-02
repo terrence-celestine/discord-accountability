@@ -6,7 +6,19 @@
 // if the day's list isn't complete. All the decision logic lives in logic.ts.
 
 import cron from "node-cron";
-import { Client, GatewayIntentBits, Events, Message, TextChannel } from "discord.js";
+import {
+  Client,
+  GatewayIntentBits,
+  Events,
+  Message,
+  TextChannel,
+  ButtonBuilder,
+  ActionRowBuilder,
+  ButtonStyle,
+  ButtonComponent,
+  ComponentType,
+  MessageFlags,
+} from "discord.js";
 
 import {
   matchedHabits,
@@ -17,6 +29,7 @@ import {
   remainingHabits,
   buildReminder,
   buildSummary,
+  buildSlotSummary,
   buildHelp,
   SLOT_INFO,
   card,
@@ -24,7 +37,7 @@ import {
   COLORS,
   BotMessage,
 } from "./logic";
-import { addHabitFromInput, SLOTS, TimeSlot } from "./habits";
+import { addHabitFromInput, findHabit, SLOTS, TimeSlot } from "./habits";
 import * as store from "./store";
 import * as audible from "./audible";
 
@@ -81,6 +94,7 @@ const sendMessage = async (payload: BotMessage): Promise<void> => {
   await (channel as TextChannel).send({
     content: payload.content,
     embeds: payload.embeds,
+    components: payload.components ?? [],
     allowedMentions: { users: [USER_ID] }, // only ping the one user
   });
 };
@@ -164,6 +178,61 @@ client.once(Events.ClientReady, (c) => {
   }
 });
 
+// Button clicks: each habit's check-off button carries customId `check:<habitId>`.
+// Clicking it checks the habit off, flips its button to a disabled green ✅ in place,
+// and sends the user a private (ephemeral) streak confirmation.
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.isButton()) return;
+
+  const [action, habitId] = interaction.customId.split(":");
+  if (action !== "check" || !habitId) return;
+
+  // Only the tracked user may check things off.
+  if (interaction.user.id !== USER_ID) {
+    await interaction.reply({
+      content: "These check-off buttons aren't yours 🙂",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const habit = findHabit(habitId);
+  if (!habit) {
+    await interaction.reply({
+      content: "That habit isn't tracked anymore.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const res = store.checkOff(habit.id, TZ);
+
+  // Rebuild the message's button rows, flipping just the tapped one to done.
+  const rows = interaction.message.components
+    .filter((row) => row.type === ComponentType.ActionRow)
+    .map((row) => {
+      const rebuilt = new ActionRowBuilder<ButtonBuilder>();
+      for (const comp of row.components) {
+        if (!(comp instanceof ButtonComponent)) continue;
+        const button = ButtonBuilder.from(comp);
+        if (comp.customId === interaction.customId) {
+          button
+            .setStyle(ButtonStyle.Success)
+            .setDisabled(true)
+            .setLabel(`✅ ${habit.name}`.slice(0, 80));
+        }
+        rebuilt.addComponents(button);
+      }
+      return rebuilt;
+    });
+  await interaction.update({ components: rows });
+
+  const note = res.alreadyDone
+    ? `${habit.emoji} **${habit.name}** was already done today.`
+    : `${habit.emoji} **${habit.name}** checked off — ${fireEmoji(res.currentStreak)}`;
+  await interaction.followUp({ content: note, flags: MessageFlags.Ephemeral });
+});
+
 client.on(Events.MessageCreate, async (message: Message) => {
   // Only react to the tracked user, in the tracked channel, ignoring bots.
   if (message.author.bot) return;
@@ -191,6 +260,19 @@ client.on(Events.MessageCreate, async (message: Message) => {
   if (/^[!\/]?(summary|status)$/.test(lower)) {
     await message.reply({
       embeds: buildSummary(TZ).embeds,
+      allowedMentions: { repliedUser: false },
+    });
+    return;
+  }
+
+  // "morning" / "afternoon" / "evening" command → what's left in that slot.
+  // Anchored to the bare word, so it won't clash with "add_habit morning ...".
+  const slotMatch = /^[!\/]?(morning|afternoon|evening)$/.exec(lower);
+  if (slotMatch) {
+    const slotMsg = buildSlotSummary(TZ, slotMatch[1] as TimeSlot);
+    await message.reply({
+      embeds: slotMsg.embeds,
+      components: slotMsg.components ?? [],
       allowedMentions: { repliedUser: false },
     });
     return;
