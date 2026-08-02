@@ -6,7 +6,7 @@
 
 import { EmbedBuilder } from "discord.js";
 
-import { allHabits, Habit } from "./habits";
+import { allHabits, habitsInSlot, Habit, TimeSlot } from "./habits";
 import * as store from "./store";
 
 // ---------- keyword matching ----------
@@ -80,7 +80,17 @@ export const COLORS = {
   undo: 0xed4245, // red — an undo
   help: 0x5865f2, // blurple — help
   audible: 0xf29f05, // orange — Audible
+  morning: 0xfdb813, // sunrise gold
+  afternoon: 0x3ba7d9, // midday blue
+  evening: 0x8e5cd9, // dusk purple
 } as const;
+
+// How each time slot presents in its check-in card.
+export const SLOT_INFO: Record<TimeSlot, { label: string; emoji: string; color: number }> = {
+  morning: { label: "Morning", emoji: "🌅", color: COLORS.morning },
+  afternoon: { label: "Afternoon", emoji: "🌞", color: COLORS.afternoon },
+  evening: { label: "Evening", emoji: "🌙", color: COLORS.evening },
+};
 
 const FOOTER = "Accountability bot • one reply can check off several habits";
 
@@ -95,18 +105,26 @@ export const simpleCard = (color: number, title: string, description: string): B
 
 export const fireEmoji = (n: number): string => (n > 0 ? `🔥 ${n}` : "no streak yet");
 
-export const buildHelp = (dailyTime: string, reminderTime: string): BotMessage => {
+export interface HelpSchedule {
+  morning: string;
+  afternoon: string;
+  evening: string;
+  reminder: string;
+}
+
+export const buildHelp = (schedule: HelpSchedule): BotMessage => {
   const embed = card(COLORS.help, "🤖 Accountability Bot — How It Works")
     .setDescription(
       "Reply with what you did and I'll check it off and track a streak per habit — e.g. " +
-        '*"drank my water and prayed"*. You can mention several at once.',
+        '*"drank my water and prayed"*. You can mention several at once. Habits are grouped ' +
+        "into **morning**, **afternoon**, and **evening**, each with its own check-in.",
     )
     .addFields(
       {
         name: "📋 Commands",
         value: [
           "• `summary` / `status` — today's progress (done + what's left)",
-          "• `add_habit <name>` — track a new habit, e.g. `add_habit 🧴 Moisturize`",
+          "• `add_habit <slot> <name>` — track a new habit in a slot, e.g. `add_habit morning 🧴 Moisturize`",
           "• `undo <habit>` — remove today's check-off, e.g. `undo water`",
           "• `audible` — check today's Audible minutes, auto-check reading at 30 min",
           "• `help` — this message",
@@ -115,8 +133,9 @@ export const buildHelp = (dailyTime: string, reminderTime: string): BotMessage =
       {
         name: "⏰ Schedule",
         value:
-          `Daily check-in at **${dailyTime}**, plus an evening nudge at ` +
-          `**${reminderTime}** if you're not done. 🔥`,
+          `🌅 Morning at **${schedule.morning}**, 🌞 afternoon at **${schedule.afternoon}**, ` +
+          `🌙 evening at **${schedule.evening}** — plus a catch-up nudge at ` +
+          `**${schedule.reminder}** if anything's still undone. 🔥`,
       },
     )
     .setFooter({ text: FOOTER });
@@ -134,6 +153,33 @@ export const buildDailyPrompt = (userId: string, tz: string): BotMessage => {
     .setDescription("What did you get done today? Reply and I'll check things off.")
     .addFields({ name: "🔥 Today's Habits", value: lines.join("\n") })
     .setFooter({ text: FOOTER });
+  return { content: `<@${userId}>`, embeds: [embed] };
+};
+
+// A per-slot check-in: pings the user and lists just that slot's habits with
+// their live streaks. Fired at the slot's scheduled time (morning/afternoon/evening).
+export const buildCategoryPrompt = (userId: string, tz: string, slot: TimeSlot): BotMessage => {
+  const info = SLOT_INFO[slot];
+  const state = store.load();
+  const slotHabits = habitsInSlot(slot);
+
+  const embed = card(info.color, `${info.emoji} ${info.label} Check-In`)
+    .setDescription(
+      slotHabits.length
+        ? `Your **${info.label.toLowerCase()}** habits — reply with what you got done.`
+        : `No **${info.label.toLowerCase()}** habits yet. Add one with \`add_habit ${slot} <name>\`.`,
+    )
+    .setFooter({ text: FOOTER });
+
+  if (slotHabits.length) {
+    const lines = slotHabits.map((h) => {
+      const eff = store.effectiveStreak(state.habits[h.id], tz);
+      const tail = eff > 0 ? `${fireEmoji(eff)} — keep it alive!` : "start a streak today";
+      return `${h.emoji} **${h.name}** — ${tail}`;
+    });
+    embed.addFields({ name: `🔥 ${info.label} Habits`, value: lines.join("\n") });
+  }
+
   return { content: `<@${userId}>`, embeds: [embed] };
 };
 

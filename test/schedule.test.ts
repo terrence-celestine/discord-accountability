@@ -4,8 +4,8 @@ import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
 import * as store from "../src/store";
-import { timeToCron, remainingHabits, buildReminder, buildDailyPrompt, buildSummary, buildHelp, matchedHabits, BotMessage } from "../src/logic";
-import { habits } from "../src/habits";
+import { timeToCron, remainingHabits, buildReminder, buildDailyPrompt, buildCategoryPrompt, buildSummary, buildHelp, matchedHabits, BotMessage } from "../src/logic";
+import { habits, habitsInSlot, SLOTS } from "../src/habits";
 
 const TZ = "America/Los_Angeles";
 let today: string;
@@ -125,13 +125,36 @@ test("buildSummary with nothing done shows 0 and all habits left", () => {
 });
 
 test("buildHelp lists the commands and the configured schedule times", () => {
-  const text = cardText(buildHelp("12:00", "19:00"));
+  const text = cardText(
+    buildHelp({ morning: "07:00", afternoon: "12:00", evening: "17:00", reminder: "20:00" }),
+  );
   expect(text).toMatch(/summary.*status/);
   expect(text).toContain("undo <habit>");
   expect(text).toContain("audible");
   expect(text).toContain("help");
+  expect(text).toContain("07:00");
   expect(text).toContain("12:00");
-  expect(text).toContain("19:00");
+  expect(text).toContain("17:00");
+  expect(text).toContain("20:00");
+});
+
+test("buildCategoryPrompt lists only that slot's habits and mentions the user", () => {
+  const morning = habitsInSlot("morning");
+  const evening = habitsInSlot("evening");
+  const msg = buildCategoryPrompt("u1", TZ, "morning");
+  expect(msg.content).toMatch(/<@u1>/);
+  const text = cardText(msg);
+  expect(text).toMatch(/Morning Check-In/i);
+  for (const h of morning) expect(text).toContain(h.name);
+  // A habit from a different slot must not appear.
+  const eveningOnly = evening.find((e) => !morning.some((m) => m.id === e.id));
+  if (eveningOnly) expect(text).not.toContain(eveningOnly.name);
+});
+
+test("every habit belongs to a known time slot, and the slots partition the list", () => {
+  for (const h of habits) expect(SLOTS).toContain(h.slot);
+  const grouped = SLOTS.reduce((sum, s) => sum + habitsInSlot(s).length, 0);
+  expect(grouped).toBe(habits.length);
 });
 
 test("matchedHabits resolves a multi-habit undo argument", () => {

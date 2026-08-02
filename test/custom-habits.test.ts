@@ -8,6 +8,7 @@ import {
   addHabitFromInput,
   allHabits,
   parseHabitInput,
+  parseSlotInput,
   slugify,
   deriveKeywords,
   habits,
@@ -43,11 +44,18 @@ test("parseHabitInput pulls a leading emoji off the name", () => {
   expect(parseHabitInput("Moisturize")).toEqual({ name: "Moisturize" });
 });
 
+test("parseSlotInput pulls a leading time slot off the input", () => {
+  expect(parseSlotInput("morning 🧴 Moisturize")).toEqual({ slot: "morning", rest: "🧴 Moisturize" });
+  expect(parseSlotInput("EVENING Read a chapter")).toEqual({ slot: "evening", rest: "Read a chapter" });
+  expect(parseSlotInput("Moisturize")).toEqual({ rest: "Moisturize" }); // no slot
+});
+
 test("addHabitFromInput adds a habit with the default icon and tracks it", () => {
-  const res = addHabitFromInput("Stretch for 5 minutes");
+  const res = addHabitFromInput("afternoon Stretch for 5 minutes");
   expect(res.ok).toBe(true);
   expect(res.habit!.emoji).toBe(DEFAULT_HABIT_EMOJI);
   expect(res.habit!.id).toBe("custom_stretch_for_5_minutes");
+  expect(res.habit!.slot).toBe("afternoon");
 
   // It now appears in the merged registry, after the built-ins.
   const all = allHabits();
@@ -55,15 +63,26 @@ test("addHabitFromInput adds a habit with the default icon and tracks it", () =>
   expect(all.some((h) => h.id === "custom_stretch_for_5_minutes")).toBe(true);
 });
 
-test("addHabitFromInput honors a supplied emoji", () => {
-  const res = addHabitFromInput("🧴 Moisturize");
+test("addHabitFromInput honors a supplied emoji after the slot", () => {
+  const res = addHabitFromInput("morning 🧴 Moisturize");
   expect(res.ok).toBe(true);
   expect(res.habit!.emoji).toBe("🧴");
   expect(res.habit!.name).toBe("Moisturize");
+  expect(res.habit!.slot).toBe("morning");
+});
+
+test("addHabitFromInput requires a valid time slot", () => {
+  const noSlot = addHabitFromInput("Moisturize");
+  expect(noSlot.ok).toBe(false);
+  expect(noSlot.error).toMatch(/morning.*afternoon.*evening/);
+
+  const slotOnly = addHabitFromInput("morning"); // slot but no name
+  expect(slotOnly.ok).toBe(false);
+  expect(slotOnly.error).toMatch(/name/i);
 });
 
 test("a custom habit is matchable by name and by a keyword, then checks off", () => {
-  addHabitFromInput("Play guitar");
+  addHabitFromInput("evening Play guitar");
   expect(matchedHabits("I finally played some guitar today").map((h) => h.id)).toContain(
     "custom_play_guitar",
   );
@@ -73,32 +92,32 @@ test("a custom habit is matchable by name and by a keyword, then checks off", ()
 });
 
 test("a custom habit shows up in the summary", () => {
-  addHabitFromInput("Play guitar");
+  addHabitFromInput("evening Play guitar");
   const s = buildSummary(TZ);
   const text = JSON.stringify(s.embeds[0].data);
   expect(text).toContain("Play guitar");
 });
 
 test("duplicate names are rejected", () => {
-  expect(addHabitFromInput("Yoga").ok).toBe(true);
-  const dup = addHabitFromInput("yoga"); // case-insensitive clash
+  expect(addHabitFromInput("morning Yoga").ok).toBe(true);
+  const dup = addHabitFromInput("evening yoga"); // case-insensitive clash, different slot
   expect(dup.ok).toBe(false);
   expect(dup.error).toMatch(/already a habit/);
 });
 
 test("empty and symbol-only names are rejected", () => {
-  expect(addHabitFromInput("   ").ok).toBe(false);
-  expect(addHabitFromInput("🧴").ok).toBe(false); // no name after the emoji
-  expect(addHabitFromInput("!!!").ok).toBe(false);
+  expect(addHabitFromInput("morning    ").ok).toBe(false);
+  expect(addHabitFromInput("morning 🧴").ok).toBe(false); // no name after the emoji
+  expect(addHabitFromInput("morning !!!").ok).toBe(false);
 });
 
 test("custom habits survive a reload (persisted to disk)", () => {
-  addHabitFromInput("Journal at night");
+  addHabitFromInput("evening Journal at night");
   expect(store.getCustomHabits().map((h) => h.id)).toEqual(["custom_journal_at_night"]);
 });
 
 test("removeCustomHabit drops it from the registry", () => {
-  addHabitFromInput("Cold shower");
+  addHabitFromInput("morning Cold shower");
   expect(store.removeCustomHabit("custom_cold_shower")).toBe(true);
   expect(allHabits().some((h) => h.id === "custom_cold_shower")).toBe(false);
   expect(store.removeCustomHabit("custom_nope")).toBe(false);

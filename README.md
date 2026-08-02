@@ -1,11 +1,14 @@
 # Discord Accountability Bot
 
-A little accountability partner for your Discord server. Each day at noon it posts a check-in
-that @-mentions you, and at 7pm it sends a follow-up nudge **only if you haven't finished the
-whole list**. When you reply with what you did ("drank my water and prayed"), it recognizes
-each habit by keyword, checks it off for the day, and tracks a **streak per habit**.
+A little accountability partner for your Discord server. Your habits are grouped into three
+**time slots** — morning, afternoon, evening — and each slot gets its own check-in that
+@-mentions you (7am, noon, and 5pm by default). Later in the evening it sends a follow-up
+nudge **only if you haven't finished the whole list**. When you reply with what you did
+("drank my water and prayed"), it recognizes each habit by keyword, checks it off for the day,
+and tracks a **streak per habit**.
 
-- **Multiple named habits**, each with its own streak (edit `src/habits.ts`).
+- **Three daily check-ins** — morning / afternoon / evening, each listing only that slot's habits.
+- **Multiple named habits**, each with its own streak and time slot (edit `src/habits.ts`).
 - **Keyword detection** with a basic negation guard ("didn't shower" won't count).
 - **Persistent** — streaks are saved to `state.json` and survive restarts/redeploys.
 - **Chat commands** — `summary` / `status` (today's progress), `add_habit <name>` (track a
@@ -24,7 +27,7 @@ Content Intent**), not just a webhook. So this is a small always-on `discord.js`
 |------|------------|
 | `src/index.ts` | Discord wiring: intents, daily cron prompt + evening nudge, reply handler. |
 | `src/logic.ts` | Pure logic (keyword matching, streak formatting, cron parsing) — no Discord, easy to test. |
-| `src/habits.ts` | Your habit list (name + emoji + keywords). **Edit this.** |
+| `src/habits.ts` | Your habit list (name + emoji + time slot + keywords). **Edit this.** |
 | `src/store.ts` | Streak state + math, saved to `state.json`. |
 | `src/audible.ts` | Optional Audible integration: derives minutes listened, auto-checks off Reading. |
 | `src/audible-setup.ts` | One-time local login (`npm run setup:audible`) to generate Audible credentials. |
@@ -56,7 +59,9 @@ Enable Developer Mode: **User Settings → Advanced → Developer Mode**. Then:
 ## 4. Configure your habits
 
 Edit `src/habits.ts` — set your real habits and the keywords that should check each one off.
-Don't change a habit's `id` after streaks start accumulating (the `id` is the storage key).
+Every habit needs a `slot` of `"morning"`, `"afternoon"`, or `"evening"`, which decides which
+check-in it shows up in. Don't change a habit's `id` after streaks start accumulating (the `id`
+is the storage key).
 
 ## 5. Run it locally (to test)
 
@@ -127,16 +132,17 @@ Railway deploys straight from GitHub and redeploys on every push.
 3. **Add a Volume** (service → Settings → Volumes) mounted at **`/data`** so streaks persist
    across deploys.
 4. **Variables** (service → Variables): set `DISCORD_TOKEN`, `CHANNEL_ID`, `USER_ID`, `TZ`,
-   `DAILY_TIME`, `REMINDER_TIME`, and `DATA_DIR=/data`. (Leave `SEND_NOW` unset in production.)
+   `MORNING_TIME`, `AFTERNOON_TIME`, `EVENING_TIME`, `REMINDER_TIME`, and `DATA_DIR=/data`.
+   (Leave `SEND_NOW` unset in production.)
 
 Build and start are driven by `railway.json`: it runs `npm run build` (compiles `src/` →
 `dist/`) and starts with `node dist/index.js`. **The start command must point at
 `dist/index.js`, not `index.js`** — the source is TypeScript, so the entrypoint only exists
 after the build. This is a background worker with no web server, so no public domain is needed.
 
-That's it — the bot stays online and pings you every day at `DAILY_TIME` in your `TZ`. Every
-`git push` to the default branch triggers a fresh deploy, and the `/data` volume keeps your
-streaks across deploys.
+That's it — the bot stays online and pings you at each slot's time (`MORNING_TIME`,
+`AFTERNOON_TIME`, `EVENING_TIME`) in your `TZ`. Every `git push` to the default branch triggers
+a fresh deploy, and the `/data` volume keeps your streaks across deploys.
 
 > Prefer the CLI? `npm i -g @railway/cli && railway login`, then `railway up` from this folder
 > deploys without GitHub. You still add the volume and variables in the dashboard.
@@ -151,11 +157,12 @@ streaks across deploys.
 - **Commands** (optionally prefixed with `!` or `/`):
   - **`summary`** / **`status`** — on-demand report of today's progress (done habits with their
     streaks, plus what's left).
-  - **`add_habit <name>`** — start tracking a custom habit, with an optional leading emoji
-    (e.g. `add_habit 🧴 Moisturize`). Without an emoji it gets a default icon (📌). Keywords for
-    checking it off are derived from the name (the whole phrase plus each meaningful word), and it
-    joins the daily check-in, summary, and nudge immediately. Custom habits are persisted in
-    `DATA_DIR/state.json`.
+  - **`add_habit <slot> <name>`** — start tracking a custom habit in a time slot. The slot
+    (`morning` / `afternoon` / `evening`) is **required** and comes first, followed by an optional
+    leading emoji (e.g. `add_habit morning 🧴 Moisturize`). Without an emoji it gets a default icon
+    (📌). Keywords for checking it off are derived from the name (the whole phrase plus each
+    meaningful word), and it joins that slot's check-in, the summary, and the nudge immediately.
+    Custom habits are persisted in `DATA_DIR/state.json`.
   - **`undo <habit>`** — reverse today's check-off for a habit (e.g. `undo water`, or
     `undo water and pray` for several). Steps the streak back; leaves your all-time best intact.
   - **`help`** — lists the commands and how check-off works.

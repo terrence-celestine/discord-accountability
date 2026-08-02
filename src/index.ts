@@ -13,16 +13,18 @@ import {
   fireEmoji,
   timeToCron,
   buildDailyPrompt,
+  buildCategoryPrompt,
   remainingHabits,
   buildReminder,
   buildSummary,
   buildHelp,
+  SLOT_INFO,
   card,
   simpleCard,
   COLORS,
   BotMessage,
 } from "./logic";
-import { addHabitFromInput } from "./habits";
+import { addHabitFromInput, SLOTS, TimeSlot } from "./habits";
 import * as store from "./store";
 import * as audible from "./audible";
 
@@ -42,13 +44,23 @@ const CHANNEL_ID = must("CHANNEL_ID");
 const USER_ID = must("USER_ID");
 
 const TZ = process.env.TZ ?? "UTC";
-const DAILY_TIME = process.env.DAILY_TIME ?? "12:00"; // the main daily check-in
-const REMINDER_TIME = process.env.REMINDER_TIME ?? "19:00"; // nudge, only if the list isn't complete
+
+// One scheduled check-in per time slot, each pinging that slot's habits.
+const SLOT_TIMES: Record<TimeSlot, string> = {
+  morning: process.env.MORNING_TIME ?? "07:00",
+  afternoon: process.env.AFTERNOON_TIME ?? "12:00",
+  evening: process.env.EVENING_TIME ?? "17:00",
+};
+const REMINDER_TIME = process.env.REMINDER_TIME ?? "20:00"; // end-of-day nudge, only if the list isn't complete
 const SEND_NOW = process.env.SEND_NOW; // "1" → fire one prompt immediately at startup (testing)
 const READING_MINUTES = Number(process.env.READING_MINUTES ?? "30"); // Audible threshold for auto-check-off
 
-// Fail fast at startup if the schedule times are malformed.
-const dailyExpr = timeToCron(DAILY_TIME);
+// Fail fast at startup if any schedule time is malformed.
+const slotExprs: Record<TimeSlot, string> = {
+  morning: timeToCron(SLOT_TIMES.morning),
+  afternoon: timeToCron(SLOT_TIMES.afternoon),
+  evening: timeToCron(SLOT_TIMES.evening),
+};
 const reminderExpr = timeToCron(REMINDER_TIME);
 
 // ---------- discord wiring ----------
@@ -82,6 +94,16 @@ const sendDailyPrompt = async (): Promise<void> => {
   }
 };
 
+// The per-slot check-in (morning / afternoon / evening).
+const sendCategoryPrompt = async (slot: TimeSlot): Promise<void> => {
+  try {
+    await sendMessage(buildCategoryPrompt(USER_ID, TZ, slot));
+    console.log(`[${new Date().toISOString()}] Sent ${slot} check-in.`);
+  } catch (err) {
+    console.error(`Failed to send ${slot} check-in:`, err);
+  }
+};
+
 // The evening nudge: only fires if some habits are still incomplete for the day.
 const sendReminderIfIncomplete = async (): Promise<void> => {
   try {
@@ -100,11 +122,15 @@ const sendReminderIfIncomplete = async (): Promise<void> => {
 client.once(Events.ClientReady, (c) => {
   console.log(`Logged in as ${c.user.tag}`);
 
-  cron.schedule(dailyExpr, sendDailyPrompt, { timezone: TZ });
-  console.log(`Scheduled daily prompt at ${DAILY_TIME} (${TZ}) — cron "${dailyExpr}"`);
+  for (const slot of SLOTS) {
+    cron.schedule(slotExprs[slot], () => void sendCategoryPrompt(slot), { timezone: TZ });
+    console.log(
+      `Scheduled ${slot} check-in at ${SLOT_TIMES[slot]} (${TZ}) — cron "${slotExprs[slot]}"`,
+    );
+  }
 
   cron.schedule(reminderExpr, sendReminderIfIncomplete, { timezone: TZ });
-  console.log(`Scheduled evening nudge at ${REMINDER_TIME} (${TZ}) — cron "${reminderExpr}"`);
+  console.log(`Scheduled catch-up nudge at ${REMINDER_TIME} (${TZ}) — cron "${reminderExpr}"`);
 
   // Audible: if credentials are configured, poll hourly to auto-check-off Reading.
   if (audible.isConfigured()) {
@@ -150,7 +176,12 @@ client.on(Events.MessageCreate, async (message: Message) => {
   // "help" command → explain the bot and list the commands.
   if (/^[!\/]?help$/.test(lower)) {
     await message.reply({
-      embeds: buildHelp(DAILY_TIME, REMINDER_TIME).embeds,
+      embeds: buildHelp({
+        morning: SLOT_TIMES.morning,
+        afternoon: SLOT_TIMES.afternoon,
+        evening: SLOT_TIMES.evening,
+        reminder: REMINDER_TIME,
+      }).embeds,
       allowedMentions: { repliedUser: false },
     });
     return;
@@ -179,8 +210,12 @@ client.on(Events.MessageCreate, async (message: Message) => {
       return;
     }
     const h = res.habit!;
+    const slotInfo = SLOT_INFO[h.slot];
     const embed = card(COLORS.done, "➕ Habit Added")
-      .setDescription(`${h.emoji} **${h.name}** is now being tracked.`)
+      .setDescription(
+        `${h.emoji} **${h.name}** is now tracked in your ${slotInfo.emoji} ` +
+          `**${slotInfo.label}** check-in (${SLOT_TIMES[h.slot]}).`,
+      )
       .addFields({
         name: "✅ Check it off by saying",
         value: h.keywords.map((k) => `\`${k}\``).join(", "),

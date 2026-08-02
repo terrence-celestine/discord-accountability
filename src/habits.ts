@@ -15,10 +15,20 @@
 
 import * as store from "./store";
 
+// The three parts of the day a habit belongs to. Each slot is pinged at its own
+// time (see MORNING_TIME / AFTERNOON_TIME / EVENING_TIME in index.ts).
+export type TimeSlot = "morning" | "afternoon" | "evening";
+
+export const SLOTS: TimeSlot[] = ["morning", "afternoon", "evening"];
+
+export const isTimeSlot = (s: string): s is TimeSlot =>
+  (SLOTS as string[]).includes(s.toLowerCase());
+
 export interface Habit {
   id: string;
   name: string;
   emoji: string;
+  slot: TimeSlot; // which daily check-in this habit belongs to
   keywords: string[];
 }
 
@@ -32,78 +42,91 @@ export const habits: Habit[] = [
     id: "water",
     name: "Drink 1 gallon of water",
     emoji: "💧",
+    slot: "morning",
     keywords: ["water", "gallon", "hydrate", "hydrated"],
   },
   {
     id: "reading",
     name: "Read for 30 minutes",
     emoji: "📖",
+    slot: "evening",
     keywords: ["read", "reading", "book", "chapter"],
   },
   {
     id: "pray",
     name: "Pray",
     emoji: "🙏",
+    slot: "morning",
     keywords: ["pray", "prayed", "prayer", "prayers", "praying"],
   },
   {
     id: "meditate",
     name: "Meditate",
     emoji: "🧘",
+    slot: "morning",
     keywords: ["meditate", "meditated", "meditation", "meditating", "mindfulness"],
   },
   {
     id: "gratitude",
     name: "Gratitude journal",
     emoji: "📓",
+    slot: "evening",
     keywords: ["gratitude", "grateful", "thankful", "journal", "journaled", "journaling"],
   },
   {
     id: "breakfast",
     name: "Eat breakfast",
     emoji: "🍳",
+    slot: "morning",
     keywords: ["breakfast"],
   },
   {
     id: "lunch",
     name: "Eat lunch",
     emoji: "🥪",
+    slot: "afternoon",
     keywords: ["lunch", "lunched"],
   },
   {
     id: "dinner",
     name: "Eat dinner",
     emoji: "🍽️",
+    slot: "evening",
     keywords: ["dinner", "supper"],
   },
   {
     id: "teeth",
     name: "Brush teeth and floss",
     emoji: "🪥",
+    slot: "morning",
     keywords: ["brush teeth", "brushed teeth", "teeth", "floss", "flossed", "flossing"],
   },
   {
     id: "shower",
     name: "Shower for 10 minutes",
     emoji: "🚿",
+    slot: "morning",
     keywords: ["shower", "showered", "showering", "bath", "bathed"],
   },
   {
     id: "clean_room",
     name: "Clean room",
     emoji: "🧹",
+    slot: "evening",
     keywords: ["clean room", "cleaned room", "clean my room", "cleaned my room", "tidy", "tidied"],
   },
   {
     id: "walk_dog",
     name: "Walk dog",
     emoji: "🐕",
+    slot: "afternoon",
     keywords: ["walk dog", "walked dog", "walk the dog", "walked the dog", "walked my dog", "dog walk"],
   },
   {
     id: "steps",
     name: "Hit 10k steps",
     emoji: "👟",
+    slot: "afternoon",
     keywords: ["steps", "10k", "10k steps", "10,000 steps"],
   },
 ];
@@ -117,6 +140,10 @@ export const allHabits = (): Habit[] => [...habits, ...store.getCustomHabits()];
 
 export const findHabit = (id: string): Habit | undefined =>
   allHabits().find((h) => h.id === id);
+
+// Every habit (built-in + custom) that belongs to a given time slot, in list order.
+export const habitsInSlot = (slot: TimeSlot): Habit[] =>
+  allHabits().filter((h) => h.slot === slot);
 
 // ---------- adding a custom habit ----------
 
@@ -165,14 +192,39 @@ export interface AddHabitResult {
   error?: string;
 }
 
+// Pull a required leading time slot off the input, e.g. "morning 🧴 Moisturize"
+// → { slot: "morning", rest: "🧴 Moisturize" }. Returns undefined slot if the
+// first word isn't one of morning/afternoon/evening.
+export const parseSlotInput = (arg: string): { slot?: TimeSlot; rest: string } => {
+  const trimmed = arg.trim();
+  const firstToken = trimmed.split(/\s+/)[0] ?? "";
+  if (!isTimeSlot(firstToken)) return { rest: trimmed };
+  return {
+    slot: firstToken.toLowerCase() as TimeSlot,
+    rest: trimmed.slice(firstToken.length).trim(),
+  };
+};
+
+const SLOT_HINT =
+  "Start with a time slot — `morning`, `afternoon`, or `evening`. " +
+  "e.g. `add_habit morning 🧴 Moisturize`.";
+
 // Validate, build, and persist a custom habit from raw "/add_habit" input.
 // Pure enough to unit-test (it only touches store, which is DATA_DIR-backed).
 export const addHabitFromInput = (arg: string): AddHabitResult => {
-  const { emoji, name: rawName } = parseHabitInput(arg);
+  const { slot, rest } = parseSlotInput(arg);
+  if (!slot) {
+    return { ok: false, error: SLOT_HINT };
+  }
+
+  const { emoji, name: rawName } = parseHabitInput(rest);
   const name = rawName.replace(/\s+/g, " ").trim();
 
   if (!name) {
-    return { ok: false, error: "Give the habit a name — e.g. `/add_habit Stretch for 5 minutes`." };
+    return {
+      ok: false,
+      error: "Give the habit a name — e.g. `add_habit morning Stretch for 5 minutes`.",
+    };
   }
   if (name.length > 80) {
     return { ok: false, error: "That name's too long — keep it under 80 characters." };
@@ -195,6 +247,7 @@ export const addHabitFromInput = (arg: string): AddHabitResult => {
     id,
     name,
     emoji: emoji?.trim() || DEFAULT_HABIT_EMOJI,
+    slot,
     keywords: deriveKeywords(name),
   };
   store.addCustomHabit(habit);
