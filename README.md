@@ -14,6 +14,8 @@ habit — tap one to check it off for the day, and it tracks a **streak per habi
   progress), `/gratitude` (write today's gratitude entry — see below), `/add-habit` (track a
   custom habit), `/undo` (reverse an accidental check-off), and `/help`. Replies are ephemeral,
   so they never clutter the channel.
+- **Verse of the Day** (optional) — posts a daily Bible verse (KJV by default) to a channel via the
+  YouVersion API. See [Verse of the Day](#verse-of-the-day-optional).
 - **Gratitude journal** — `/gratitude` opens a modal to write (or edit) one entry per day; saving
   it checks off the built-in `gratitude` habit and earns its streak. A 🙏 button on the evening
   check-in opens the same modal. Set an optional **`GRATITUDE_CHANNEL_ID`** and each entry is also
@@ -41,6 +43,7 @@ privileged **Message Content Intent can stay OFF**.
 | `src/habits.ts` | Your habit list (name + emoji + time slot + keywords). **Edit this.** |
 | `src/store.ts` | Streak state + math, saved to `state.json`. |
 | `src/audible.ts` | Optional Audible integration: derives minutes listened, auto-checks off Reading. |
+| `src/votd.ts` | Optional Verse of the Day: fetches the YouVersion daily verse for the scheduled post. |
 | `src/audible-setup.ts` | One-time local login (`npm run setup:audible`) to generate Audible credentials. |
 | `src/ingest.ts` | Samsung Health ingest logic: maps pushed steps/water/meditation to habit check-offs. |
 | `src/http.ts` | The `POST /ingest` + `GET /status` request handler (no Discord dep, unit-tested). |
@@ -181,6 +184,36 @@ public URL under **Service → Settings → Networking → Generate Domain** so 
 Railway injects `PORT` automatically; the bot listens on it. Point your phone automation at
 `https://<your-domain>/ingest` with the `Authorization: Bearer` header.
 
+## Verse of the Day (optional)
+
+Post a daily Bible verse to a channel using the [YouVersion Platform API](https://developers.youversion.com/overview).
+Fully optional — leave `YOUVERSION_APP_KEY` unset and the bot ignores it entirely.
+
+**Prerequisite:** register at the YouVersion Platform Portal and get an **App Key** (their API is
+**non-commercial use only**). The App Key is sent as the `X-YVP-App-Key` header — it identifies your
+app, not a user.
+
+**How it works:** at `VOTD_TIME` each day the bot makes two calls — first
+`GET /v1/verse_of_the_days/{dayOfYear}` (which returns a *reference* like `ISA.12.2`, not the text),
+then `GET /v1/bibles/{versionId}/passages/{ref}?format=text` for the verse itself — and posts a card
+(no @-mention) to `VOTD_CHANNEL_ID` with a "via YouVersion" attribution footer. API/network errors
+are logged and skipped for the day; the bot stays up.
+
+**Enable it** (both required to turn it on):
+
+- `YOUVERSION_APP_KEY` — your App Key.
+- `VOTD_CHANNEL_ID` — the channel to post in (right-click → Copy Channel ID).
+
+**Optional knobs:**
+
+- `VOTD_TIME` (default `08:00`, local to `TZ`) — when it posts.
+- `BIBLE_VERSION_ID` (default `1` = **KJV**, public domain) — the YouVersion version id. Others
+  (e.g. `111` NIV, `59` ESV, `116` NLT) only work if that version is **enabled on your App Key**.
+- `BIBLE_VERSION_LABEL` (default `KJV`) — the label shown on the card for attribution.
+
+Test it by setting `VOTD_TIME` a minute ahead (or `SEND_NOW=1`, which also fires one verse at
+startup) and running `npm run dev`.
+
 ## Gratitude journal channel (optional)
 
 `/gratitude` always saves one editable entry per day (and checks off the `gratitude` habit for
@@ -211,6 +244,8 @@ Railway deploys straight from GitHub and redeploys on every push.
    `MORNING_TIME`, `AFTERNOON_TIME`, `EVENING_TIME`, `REMINDER_TIME`, and `DATA_DIR=/data`.
    (Leave `SEND_NOW` unset in production.) Optionally set `GRATITUDE_CHANNEL_ID` to mirror
    gratitude entries to a channel — see [Gratitude journal channel](#gratitude-journal-channel-optional).
+   For the daily verse, set `YOUVERSION_APP_KEY` + `VOTD_CHANNEL_ID` (and optionally `VOTD_TIME` /
+   `BIBLE_VERSION_ID` / `BIBLE_VERSION_LABEL`) — see [Verse of the Day](#verse-of-the-day-optional).
    To enable the Samsung Health endpoints, also set `INGEST_TOKEN` (and optionally `STEPS_GOAL` /
    `WATER_GOAL_GALLONS` / `MEDITATION_MINUTES`) — see [Samsung Health ingest](#samsung-health-ingest-optional).
 

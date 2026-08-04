@@ -126,6 +126,20 @@ export const buildGratitudeConfirm = (text: string, streak: number): BotMessage 
     `${text}\n\n${fireEmoji(streak)} — keep it going.`,
   );
 
+// ---------- verse of the day ----------
+
+// The card posted to the verse-of-the-day channel. Shows the passage as a blockquote
+// with its reference + version, and a "via YouVersion" footer for attribution.
+export const buildVerseOfDay = (
+  verse: { reference: string; text: string },
+  versionLabel: string,
+): BotMessage => {
+  const embed = card(COLORS.verse, "📖 Verse of the Day")
+    .setDescription(`> ${verse.text}\n\n**— ${verse.reference} (${versionLabel})**`)
+    .setFooter({ text: "via YouVersion" });
+  return { embeds: [embed] };
+};
+
 // The card posted to the optional gratitude journal channel — one per day, edited
 // in place when that day's entry changes so the channel reads as a clean archive.
 export const buildGratitudeEntryCard = (day: string, text: string, streak: number): BotMessage => {
@@ -183,6 +197,7 @@ export const COLORS = {
   undo: 0xed4245, // red — an undo
   help: 0x5865f2, // blurple — help
   audible: 0xf29f05, // orange — Audible
+  verse: 0xc9a227, // warm gold — verse of the day
   morning: 0xfdb813, // sunrise gold
   afternoon: 0x3ba7d9, // midday blue
   evening: 0x8e5cd9, // dusk purple

@@ -35,6 +35,7 @@ import {
   buildGratitudeModal,
   buildGratitudeConfirm,
   buildGratitudeEntryCard,
+  buildVerseOfDay,
   GRATITUDE_HABIT_ID,
   GRATITUDE_ADD_ID,
   GRATITUDE_MODAL_ID,
@@ -49,6 +50,7 @@ import { addHabitFromInput, findHabit, SLOTS, TimeSlot } from "./habits";
 import { registerGuildCommands } from "./commands";
 import * as store from "./store";
 import * as audible from "./audible";
+import * as votd from "./votd";
 import * as ingest from "./ingest";
 import { createIngestListener } from "./http";
 
@@ -88,6 +90,14 @@ const PORT = Number(process.env.PORT ?? "3000");
 // as a per-day card (edited in place on later edits). Unset → no mirroring.
 const GRATITUDE_CHANNEL_ID = process.env.GRATITUDE_CHANNEL_ID;
 
+// Optional Verse of the Day (YouVersion). Enabled only when both the app key and a
+// target channel are set; posts a KJV verse card at VOTD_TIME each day.
+const VOTD_CHANNEL_ID = process.env.VOTD_CHANNEL_ID;
+const VOTD_TIME = process.env.VOTD_TIME ?? "08:00";
+const BIBLE_VERSION_ID = process.env.BIBLE_VERSION_ID ?? "1"; // 1 = KJV (public domain)
+const BIBLE_VERSION_LABEL = process.env.BIBLE_VERSION_LABEL ?? "KJV";
+const VOTD_ENABLED = votd.isConfigured() && !!VOTD_CHANNEL_ID;
+
 // Fail fast at startup if any schedule time is malformed.
 const slotExprs: Record<TimeSlot, string> = {
   morning: timeToCron(SLOT_TIMES.morning),
@@ -95,6 +105,7 @@ const slotExprs: Record<TimeSlot, string> = {
   evening: timeToCron(SLOT_TIMES.evening),
 };
 const reminderExpr = timeToCron(REMINDER_TIME);
+const votdExpr = VOTD_ENABLED ? timeToCron(VOTD_TIME) : null;
 
 // ---------- discord wiring ----------
 
@@ -147,6 +158,27 @@ const mirrorGratitudeToChannel = async (text: string, streak: number): Promise<v
     store.setGratitudeMessageId(sent.id, TZ);
   } catch (err) {
     console.error("Failed to mirror gratitude entry to channel:", err);
+  }
+};
+
+// Fetch today's Verse of the Day and post it (no mention) to the VOTD channel.
+// Best-effort: any API/network failure is logged and skipped so the bot stays up.
+const postVerseOfTheDay = async (): Promise<void> => {
+  if (!VOTD_ENABLED || !VOTD_CHANNEL_ID) return;
+  try {
+    const verse = await votd.fetchVerseOfTheDay(TZ, BIBLE_VERSION_ID, process.env.YOUVERSION_APP_KEY!);
+    const channel = await client.channels.fetch(VOTD_CHANNEL_ID);
+    if (!channel?.isTextBased() || !("send" in channel)) {
+      console.error(`VOTD channel ${VOTD_CHANNEL_ID} isn't a text channel the bot can post in.`);
+      return;
+    }
+    await (channel as TextChannel).send({
+      embeds: buildVerseOfDay(verse, BIBLE_VERSION_LABEL).embeds,
+      allowedMentions: { parse: [] }, // devotional post — never ping anyone
+    });
+    console.log(`[${new Date().toISOString()}] Posted verse of the day (${verse.reference}).`);
+  } catch (err) {
+    console.error("Failed to post verse of the day:", err);
   }
 };
 
@@ -293,9 +325,20 @@ client.once(Events.ClientReady, (c) => {
       : "Gratitude journal channel disabled (no GRATITUDE_CHANNEL_ID).",
   );
 
+  if (votdExpr) {
+    cron.schedule(votdExpr, () => void postVerseOfTheDay(), { timezone: TZ });
+    console.log(
+      `Verse of the Day enabled — posting to ${VOTD_CHANNEL_ID} at ${VOTD_TIME} (${TZ}), ` +
+        `${BIBLE_VERSION_LABEL} (version ${BIBLE_VERSION_ID}).`,
+    );
+  } else {
+    console.log("Verse of the Day disabled (needs YOUVERSION_APP_KEY + VOTD_CHANNEL_ID).");
+  }
+
   if (SEND_NOW === "1") {
     console.log("SEND_NOW=1 → sending one prompt now.");
     void sendDailyPrompt();
+    if (votdExpr) void postVerseOfTheDay();
   }
 });
 
