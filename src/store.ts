@@ -41,7 +41,8 @@ export interface State {
   habits: Record<string, HabitState>;
   audible?: AudibleState;
   health?: HealthState; // latest pushed Samsung Health values for the current day
-  customHabits?: Habit[]; // user-defined habits added at runtime via /add_habit
+  customHabits?: Habit[]; // user-defined habits added at runtime via /add-habit
+  gratitude?: Record<string, string>; // local day (YYYY-MM-DD) → that day's gratitude entry
 }
 
 export interface CheckOffResult {
@@ -201,6 +202,19 @@ export const setHealth = (values: Omit<HealthState, "date">, tz: string): Health
   s.health = next;
   save(s);
   return next;
+};
+
+// ---------- gratitude journal (one editable entry per local day) ----------
+
+// Today's entry (or a specific day's), or undefined if nothing's written yet.
+export const getGratitude = (tz: string, day?: string): string | undefined =>
+  load().gratitude?.[day ?? todayStr(tz)];
+
+// Overwrite today's gratitude entry. One entry per day — re-saving replaces it.
+export const setGratitude = (text: string, tz: string): void => {
+  const s = load();
+  s.gratitude = { ...(s.gratitude ?? {}), [todayStr(tz)]: text };
+  save(s);
 };
 
 // ---------- custom habits ----------

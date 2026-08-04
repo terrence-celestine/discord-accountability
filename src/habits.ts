@@ -35,7 +35,7 @@ export interface Habit {
 // The default icon a custom habit gets when the user doesn't supply an emoji.
 export const DEFAULT_HABIT_EMOJI = "📌";
 
-// The built-in habits. These always exist; custom habits (added via /add_habit)
+// The built-in habits. These always exist; custom habits (added via /add-habit)
 // are stored separately and merged in by allHabits().
 export const habits: Habit[] = [
   {
@@ -206,10 +206,9 @@ export const parseSlotInput = (arg: string): { slot?: TimeSlot; rest: string } =
 };
 
 const SLOT_HINT =
-  "Start with a time slot — `morning`, `afternoon`, or `evening`. " +
-  "e.g. `add_habit morning 🧴 Moisturize`.";
+  "Pick a time slot — `morning`, `afternoon`, or `evening` — with `/add-habit`.";
 
-// Validate, build, and persist a custom habit from raw "/add_habit" input.
+// Validate, build, and persist a custom habit from raw "/add-habit" input.
 // Pure enough to unit-test (it only touches store, which is DATA_DIR-backed).
 export const addHabitFromInput = (arg: string): AddHabitResult => {
   const { slot, rest } = parseSlotInput(arg);
@@ -223,7 +222,7 @@ export const addHabitFromInput = (arg: string): AddHabitResult => {
   if (!name) {
     return {
       ok: false,
-      error: "Give the habit a name — e.g. `add_habit morning Stretch for 5 minutes`.",
+      error: "Give the habit a name — e.g. `/add-habit slot:morning name:Stretch for 5 minutes`.",
     };
   }
   if (name.length > 80) {

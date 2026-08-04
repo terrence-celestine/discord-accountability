@@ -11,13 +11,13 @@ import {
   Client,
   GatewayIntentBits,
   Events,
-  Message,
   TextChannel,
   ButtonBuilder,
   ActionRowBuilder,
   ButtonStyle,
   ButtonComponent,
   ComponentType,
+  ChatInputCommandInteraction,
   MessageFlags,
 } from "discord.js";
 
@@ -32,6 +32,12 @@ import {
   buildSummary,
   buildSlotSummary,
   buildHelp,
+  buildGratitudeModal,
+  buildGratitudeConfirm,
+  GRATITUDE_HABIT_ID,
+  GRATITUDE_ADD_ID,
+  GRATITUDE_MODAL_ID,
+  GRATITUDE_INPUT_ID,
   SLOT_INFO,
   card,
   simpleCard,
@@ -39,6 +45,7 @@ import {
   BotMessage,
 } from "./logic";
 import { addHabitFromInput, findHabit, SLOTS, TimeSlot } from "./habits";
+import { registerGuildCommands } from "./commands";
 import * as store from "./store";
 import * as audible from "./audible";
 import * as ingest from "./ingest";
@@ -86,12 +93,12 @@ const reminderExpr = timeToCron(REMINDER_TIME);
 
 // ---------- discord wiring ----------
 
+// Only the Guilds intent is needed: the bot posts messages (no intent required to
+// send) and everything the user does is an interaction (slash commands, buttons,
+// modals). Free-text check-off is gone, so the privileged Message Content intent
+// can be turned OFF in the dev portal.
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent, // privileged — must be enabled in the dev portal
-  ],
+  intents: [GatewayIntentBits.Guilds],
 });
 
 const sendMessage = async (payload: BotMessage): Promise<void> => {
@@ -134,7 +141,7 @@ const sendReminderIfIncomplete = async (): Promise<void> => {
       console.log(`[${new Date().toISOString()}] All habits complete — skipping reminder.`);
       return;
     }
-    await sendMessage(buildReminder(USER_ID, remaining));
+    await sendMessage(buildReminder(USER_ID, remaining, TZ));
     console.log(`[${new Date().toISOString()}] Sent reminder (${remaining.length} remaining).`);
   } catch (err) {
     console.error("Failed to send reminder:", err);
@@ -188,6 +195,26 @@ const startIngestServer = (): void => {
 client.once(Events.ClientReady, (c) => {
   console.log(`Logged in as ${c.user.tag}`);
 
+  // Register the slash commands on the guild that owns the configured channel, so
+  // they show up instantly. Needs the bot invited with the `applications.commands`
+  // scope — a failure here (e.g. "Missing Access") means it needs re-inviting.
+  void (async () => {
+    try {
+      const channel = await client.channels.fetch(CHANNEL_ID);
+      const guildId = channel && "guildId" in channel ? channel.guildId : null;
+      if (!guildId) {
+        console.error("Could not resolve a guild from CHANNEL_ID — slash commands not registered.");
+        return;
+      }
+      await registerGuildCommands(client, guildId);
+    } catch (err) {
+      console.error(
+        "Failed to register slash commands (re-invite the bot with the applications.commands scope?):",
+        err,
+      );
+    }
+  })();
+
   for (const slot of SLOTS) {
     cron.schedule(slotExprs[slot], () => void sendCategoryPrompt(slot), { timezone: TZ });
     console.log(
@@ -230,242 +257,227 @@ client.once(Events.ClientReady, (c) => {
   }
 });
 
-// Button clicks: each habit's check-off button carries customId `check:<habitId>`.
-// Clicking it checks the habit off, flips its button to a disabled green ✅ in place,
-// and sends the user a private (ephemeral) streak confirmation.
-client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isButton()) return;
-
-  const [action, habitId] = interaction.customId.split(":");
-  if (action !== "check" || !habitId) return;
-
-  // Only the tracked user may check things off.
-  if (interaction.user.id !== USER_ID) {
-    await interaction.reply({
-      content: "These check-off buttons aren't yours 🙂",
-      flags: MessageFlags.Ephemeral,
-    });
-    return;
-  }
-
-  const habit = findHabit(habitId);
-  if (!habit) {
-    await interaction.reply({
-      content: "That habit isn't tracked anymore.",
-      flags: MessageFlags.Ephemeral,
-    });
-    return;
-  }
-
-  const res = store.checkOff(habit.id, TZ);
-
-  // Rebuild the message's button rows, flipping just the tapped one to done.
-  const rows = interaction.message.components
-    .filter((row) => row.type === ComponentType.ActionRow)
-    .map((row) => {
-      const rebuilt = new ActionRowBuilder<ButtonBuilder>();
-      for (const comp of row.components) {
-        if (!(comp instanceof ButtonComponent)) continue;
-        const button = ButtonBuilder.from(comp);
-        if (comp.customId === interaction.customId) {
-          button
-            .setStyle(ButtonStyle.Success)
-            .setDisabled(true)
-            .setLabel(`✅ ${habit.name}`.slice(0, 80));
-        }
-        rebuilt.addComponents(button);
-      }
-      return rebuilt;
-    });
-  await interaction.update({ components: rows });
-
-  const note = res.alreadyDone
-    ? `${habit.emoji} **${habit.name}** was already done today.`
-    : `${habit.emoji} **${habit.name}** checked off — ${fireEmoji(res.currentStreak)}`;
-  await interaction.followUp({ content: note, flags: MessageFlags.Ephemeral });
-});
-
-client.on(Events.MessageCreate, async (message: Message) => {
-  // Only react to the tracked user, in the tracked channel, ignoring bots.
-  if (message.author.bot) return;
-  if (message.channelId !== CHANNEL_ID) return;
-  if (message.author.id !== USER_ID) return;
-
-  const trimmed = message.content.trim();
-  const lower = trimmed.toLowerCase();
-
-  // "help" command → explain the bot and list the commands.
-  if (/^[!\/]?help$/.test(lower)) {
-    await message.reply({
-      embeds: buildHelp({
-        morning: SLOT_TIMES.morning,
-        afternoon: SLOT_TIMES.afternoon,
-        evening: SLOT_TIMES.evening,
-        reminder: REMINDER_TIME,
-      }).embeds,
-      allowedMentions: { repliedUser: false },
-    });
-    return;
-  }
-
-  // "summary" / "status" command → report today's progress on demand.
-  if (/^[!\/]?(summary|status)$/.test(lower)) {
-    await message.reply({
-      embeds: buildSummary(TZ).embeds,
-      allowedMentions: { repliedUser: false },
-    });
-    return;
-  }
-
-  // "morning" / "afternoon" / "evening" command → what's left in that slot.
-  // Anchored to the bare word, so it won't clash with "add_habit morning ...".
-  const slotMatch = /^[!\/]?(morning|afternoon|evening)$/.exec(lower);
-  if (slotMatch) {
-    const slotMsg = buildSlotSummary(TZ, slotMatch[1] as TimeSlot);
-    await message.reply({
-      embeds: slotMsg.embeds,
-      components: slotMsg.components ?? [],
-      allowedMentions: { repliedUser: false },
-    });
-    return;
-  }
-
-  // "add_habit <name>" command → create a custom habit. Accepts "/add_habit",
-  // "!add_habit", "add habit", or "addhabit", with an optional leading emoji.
-  // Must run BEFORE keyword check-off so the habit name in the arg isn't matched.
-  const addMatch = /^[!\/]?add[ _]?habit\b(.*)/i.exec(trimmed);
-  if (addMatch) {
-    const res = addHabitFromInput(addMatch[1]);
-    if (!res.ok) {
-      await message.reply({
-        embeds: simpleCard(COLORS.undo, "➕ Add Habit", res.error!).embeds,
-        allowedMentions: { repliedUser: false },
-      });
-      return;
-    }
-    const h = res.habit!;
-    const slotInfo = SLOT_INFO[h.slot];
-    const embed = card(COLORS.done, "➕ Habit Added")
-      .setDescription(
-        `${h.emoji} **${h.name}** is now tracked in your ${slotInfo.emoji} ` +
-          `**${slotInfo.label}** check-in (${SLOT_TIMES[h.slot]}).`,
-      )
-      .addFields({
-        name: "✅ Check it off by saying",
-        value: h.keywords.map((k) => `\`${k}\``).join(", "),
-      });
-    await message.reply({ embeds: [embed], allowedMentions: { repliedUser: false } });
-    return;
-  }
-
-  // "undo <habit>" command → reverse today's check-off. Must run BEFORE keyword check-off,
-  // or "undo water" would match the "water" keyword and check it ON instead.
-  const undoMatch = /^[!\/]?undo\b(.*)/i.exec(trimmed);
-  if (undoMatch) {
-    const arg = undoMatch[1].trim();
-    if (!arg) {
-      await message.reply({
-        embeds: simpleCard(COLORS.undo, "↩️ Undo", "Which habit should I undo? e.g. `undo water`").embeds,
-        allowedMentions: { repliedUser: false },
-      });
-      return;
-    }
-    const targets = matchedHabits(arg);
-    if (targets.length === 0) {
-      await message.reply({
-        embeds: simpleCard(
-          COLORS.undo,
-          "↩️ Undo",
-          "I couldn't tell which habit that is — try `undo <habit keyword>`.",
-        ).embeds,
-        allowedMentions: { repliedUser: false },
-      });
-      return;
-    }
-    const lines = targets.map((habit) => {
-      const res = store.uncheck(habit.id, TZ);
-      if (!res.wasDone) {
-        return `${habit.emoji} **${habit.name}** wasn't checked off today.`;
-      }
-      const streak = res.currentStreak > 0 ? fireEmoji(res.currentStreak) : "no active streak";
-      return `${habit.emoji} **${habit.name}** unchecked — ${streak}`;
-    });
-    const undoEmbed = card(COLORS.undo, "↩️ Undo").setDescription(lines.join("\n"));
-    await message.reply({
-      embeds: [undoEmbed],
-      allowedMentions: { repliedUser: false },
-    });
-    return;
-  }
-
-  // "audible" / "listened" command → check Audible minutes now and check off reading at 30.
-  if (/^[!\/]?(audible|listened|listening)$/.test(lower)) {
-    if (!audible.isConfigured()) {
-      await message.reply({
-        embeds: simpleCard(COLORS.audible, "🎧 Audible", "Audible isn't set up — no credentials configured.").embeds,
-        allowedMentions: { repliedUser: false },
-      });
-      return;
-    }
-    if ("sendTyping" in message.channel) await message.channel.sendTyping().catch(() => {});
-    try {
-      const r = await audible.pollAudible(TZ, READING_MINUTES);
-      const mins = Math.round(r.minutesToday);
-      let color: number = COLORS.audible;
-      let description: string;
-      if (r.checkedOff) {
-        color = COLORS.done;
-        description = `${mins} min on Audible today — **reading checked off!** 🔥 ${r.currentStreak}`;
-      } else if (r.done) {
-        color = COLORS.done;
-        description = `${mins} min on Audible today — reading's already done today. ✅`;
-      } else {
-        const left = Math.max(0, READING_MINUTES - mins);
-        description = `${mins} min on Audible today — ${left} more to hit ${READING_MINUTES}. 📖`;
-      }
-      await message.reply({
-        embeds: simpleCard(color, "🎧 Audible", description).embeds,
-        allowedMentions: { repliedUser: false },
-      });
-    } catch (err) {
-      console.error("[audible] command failed:", err);
-      await message.reply({
-        embeds: simpleCard(COLORS.audible, "🎧 Audible", "Couldn't reach Audible right now — try again in a bit.").embeds,
-        allowedMentions: { repliedUser: false },
-      });
-    }
-    return;
-  }
-
-  const matched = matchedHabits(message.content);
-  if (matched.length === 0) return; // just chatting; stay quiet
-
-  const parts: string[] = [];
-  let anyNew = false;
-  for (const habit of matched) {
-    const res = store.checkOff(habit.id, TZ);
-    if (res.alreadyDone) {
-      parts.push(`${habit.emoji} **${habit.name}** (already done today)`);
-    } else {
-      anyNew = true;
-      parts.push(`${habit.emoji} **${habit.name}**`);
-    }
-  }
-
-  try {
-    await message.react("✅");
-  } catch {
-    /* reacting is best-effort */
-  }
-  const embed = card(
-    anyNew ? COLORS.done : COLORS.summary,
-    anyNew ? "✅ Nice work!" : "✅ Already logged",
-  ).setDescription(parts.join("\n"));
-  await message.reply({
-    embeds: [embed],
-    allowedMentions: { repliedUser: false },
+// Reply to a slash command with a private (ephemeral) card built by logic.ts.
+const replyEphemeral = async (
+  interaction: ChatInputCommandInteraction,
+  msg: BotMessage,
+): Promise<void> => {
+  await interaction.reply({
+    content: msg.content,
+    embeds: msg.embeds,
+    components: msg.components ?? [],
+    flags: MessageFlags.Ephemeral,
   });
+};
+
+// The single interaction router: slash commands, buttons, and modal submits.
+// Everything is gated to the tracked user (this is a personal accountability bot)
+// and every command reply is ephemeral, so nothing lands in the channel.
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (
+    (interaction.isChatInputCommand() || interaction.isButton() || interaction.isModalSubmit()) &&
+    interaction.user.id !== USER_ID
+  ) {
+    if (!interaction.isModalSubmit()) {
+      await interaction.reply({ content: "This bot is personal 🙂", flags: MessageFlags.Ephemeral });
+    }
+    return;
+  }
+
+  if (interaction.isChatInputCommand()) {
+    await handleCommand(interaction);
+    return;
+  }
+
+  if (interaction.isButton()) {
+    // Gratitude is written, not tapped: its button opens the modal.
+    if (interaction.customId === GRATITUDE_ADD_ID) {
+      await interaction.showModal(buildGratitudeModal(store.getGratitude(TZ)));
+      return;
+    }
+
+    const [action, habitId] = interaction.customId.split(":");
+    if (action !== "check" || !habitId) return;
+
+    const habit = findHabit(habitId);
+    if (!habit) {
+      await interaction.reply({ content: "That habit isn't tracked anymore.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const res = store.checkOff(habit.id, TZ);
+    // Rebuild the message's button rows, flipping just the tapped one to done.
+    const rows = interaction.message.components
+      .filter((row) => row.type === ComponentType.ActionRow)
+      .map((row) => {
+        const rebuilt = new ActionRowBuilder<ButtonBuilder>();
+        for (const comp of row.components) {
+          if (!(comp instanceof ButtonComponent)) continue;
+          const button = ButtonBuilder.from(comp);
+          if (comp.customId === interaction.customId) {
+            button.setStyle(ButtonStyle.Success).setDisabled(true).setLabel(`✅ ${habit.name}`.slice(0, 80));
+          }
+          rebuilt.addComponents(button);
+        }
+        return rebuilt;
+      });
+    await interaction.update({ components: rows });
+    const note = res.alreadyDone
+      ? `${habit.emoji} **${habit.name}** was already done today.`
+      : `${habit.emoji} **${habit.name}** checked off — ${fireEmoji(res.currentStreak)}`;
+    await interaction.followUp({ content: note, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId === GRATITUDE_MODAL_ID) {
+    const text = interaction.fields.getTextInputValue(GRATITUDE_INPUT_ID).trim();
+    store.setGratitude(text, TZ);
+    const res = store.checkOff(GRATITUDE_HABIT_ID, TZ);
+    const confirm = buildGratitudeConfirm(text, res.currentStreak);
+
+    // If the modal was opened from a prompt/nudge button, flip that button green
+    // in place (kept tappable for edits), then confirm privately. Otherwise (from
+    // the /gratitude command) there's no source message — just confirm.
+    if (interaction.isFromMessage()) {
+      const habit = findHabit(GRATITUDE_HABIT_ID);
+      // Flip the gratitude button green but keep it enabled so the entry stays editable.
+      const rows = interaction.message.components
+        .filter((row) => row.type === ComponentType.ActionRow)
+        .map((row) => {
+          const rebuilt = new ActionRowBuilder<ButtonBuilder>();
+          for (const comp of row.components) {
+            if (!(comp instanceof ButtonComponent)) continue;
+            const button = ButtonBuilder.from(comp);
+            if (comp.customId === GRATITUDE_ADD_ID) {
+              button
+                .setStyle(ButtonStyle.Success)
+                .setLabel(`✅ ${habit?.name ?? "Gratitude journal"}`.slice(0, 80));
+            }
+            rebuilt.addComponents(button);
+          }
+          return rebuilt;
+        });
+      await interaction.update({ components: rows });
+      await interaction.followUp({ ...confirm, flags: MessageFlags.Ephemeral });
+    } else {
+      await interaction.reply({ ...confirm, flags: MessageFlags.Ephemeral });
+    }
+    return;
+  }
 });
+
+// ---------- slash command handlers ----------
+
+const handleCommand = async (interaction: ChatInputCommandInteraction): Promise<void> => {
+  switch (interaction.commandName) {
+    case "summary":
+      await replyEphemeral(interaction, buildSummary(TZ));
+      return;
+
+    case "slot": {
+      const slot = interaction.options.getString("slot", true) as TimeSlot;
+      await replyEphemeral(interaction, buildSlotSummary(TZ, slot));
+      return;
+    }
+
+    case "help":
+      await replyEphemeral(
+        interaction,
+        buildHelp({
+          morning: SLOT_TIMES.morning,
+          afternoon: SLOT_TIMES.afternoon,
+          evening: SLOT_TIMES.evening,
+          reminder: REMINDER_TIME,
+        }),
+      );
+      return;
+
+    case "gratitude":
+      await interaction.showModal(buildGratitudeModal(store.getGratitude(TZ)));
+      return;
+
+    case "add-habit": {
+      const slot = interaction.options.getString("slot", true);
+      const name = interaction.options.getString("name", true);
+      const emoji = interaction.options.getString("emoji") ?? "";
+      // Reuse the existing parser/validator by reconstructing its "slot [emoji] name" input.
+      const res = addHabitFromInput(`${slot} ${emoji} ${name}`.replace(/\s+/g, " ").trim());
+      if (!res.ok) {
+        await replyEphemeral(interaction, simpleCard(COLORS.undo, "➕ Add Habit", res.error!));
+        return;
+      }
+      const h = res.habit!;
+      const slotInfo = SLOT_INFO[h.slot];
+      const embed = card(COLORS.done, "➕ Habit Added")
+        .setDescription(
+          `${h.emoji} **${h.name}** is now tracked in your ${slotInfo.emoji} ` +
+            `**${slotInfo.label}** check-in (${SLOT_TIMES[h.slot]}).`,
+        )
+        .addFields({
+          name: "✅ How it works",
+          value: "It'll appear as a tappable button on that slot's check-in.",
+        });
+      await replyEphemeral(interaction, { embeds: [embed] });
+      return;
+    }
+
+    case "undo": {
+      const arg = interaction.options.getString("habit", true).trim();
+      const targets = matchedHabits(arg);
+      if (targets.length === 0) {
+        await replyEphemeral(
+          interaction,
+          simpleCard(COLORS.undo, "↩️ Undo", "I couldn't tell which habit that is — try a habit keyword."),
+        );
+        return;
+      }
+      const lines = targets.map((habit) => {
+        const res = store.uncheck(habit.id, TZ);
+        if (!res.wasDone) return `${habit.emoji} **${habit.name}** wasn't checked off today.`;
+        const streak = res.currentStreak > 0 ? fireEmoji(res.currentStreak) : "no active streak";
+        return `${habit.emoji} **${habit.name}** unchecked — ${streak}`;
+      });
+      await replyEphemeral(interaction, {
+        embeds: [card(COLORS.undo, "↩️ Undo").setDescription(lines.join("\n"))],
+      });
+      return;
+    }
+
+    case "audible": {
+      if (!audible.isConfigured()) {
+        await replyEphemeral(
+          interaction,
+          simpleCard(COLORS.audible, "🎧 Audible", "Audible isn't set up — no credentials configured."),
+        );
+        return;
+      }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        const r = await audible.pollAudible(TZ, READING_MINUTES);
+        const mins = Math.round(r.minutesToday);
+        let color: number = COLORS.audible;
+        let description: string;
+        if (r.checkedOff) {
+          color = COLORS.done;
+          description = `${mins} min on Audible today — **reading checked off!** 🔥 ${r.currentStreak}`;
+        } else if (r.done) {
+          color = COLORS.done;
+          description = `${mins} min on Audible today — reading's already done today. ✅`;
+        } else {
+          const left = Math.max(0, READING_MINUTES - mins);
+          description = `${mins} min on Audible today — ${left} more to hit ${READING_MINUTES}. 📖`;
+        }
+        await interaction.editReply({ embeds: simpleCard(color, "🎧 Audible", description).embeds });
+      } catch (err) {
+        console.error("[audible] command failed:", err);
+        await interaction.editReply({
+          embeds: simpleCard(COLORS.audible, "🎧 Audible", "Couldn't reach Audible right now — try again in a bit.").embeds,
+        });
+      }
+      return;
+    }
+  }
+};
 
 // Only start listeners/connections when run directly (production entrypoint), never
 // on import. The ingest HTTP server starts first and independently of Discord, so the

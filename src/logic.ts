@@ -4,7 +4,15 @@
 // state via store), so it's easy to unit-test without a gateway connection.
 // index.ts imports these and wires them to discord.js events.
 
-import { EmbedBuilder, ButtonBuilder, ActionRowBuilder, ButtonStyle } from "discord.js";
+import {
+  EmbedBuilder,
+  ButtonBuilder,
+  ActionRowBuilder,
+  ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+} from "discord.js";
 
 import { allHabits, habitsInSlot, Habit, TimeSlot } from "./habits";
 import * as store from "./store";
@@ -82,6 +90,42 @@ export interface BotMessage {
 const BUTTONS_PER_ROW = 5;
 const MAX_BUTTON_ROWS = 5;
 
+// ---------- gratitude journal ----------
+//
+// The gratitude habit is written through a modal rather than a keyword/tap, so
+// its check-off both records the entry and earns the streak. These customIds tie
+// the button (opens the modal), the modal, and its text input together across
+// logic.ts and the interaction router in index.ts.
+export const GRATITUDE_HABIT_ID = "gratitude";
+export const GRATITUDE_ADD_ID = "gratitude:add"; // button → showModal
+export const GRATITUDE_MODAL_ID = "gratitude:modal"; // modal submit
+export const GRATITUDE_INPUT_ID = "entry"; // text input inside the modal
+
+// The modal for writing/editing today's gratitude entry, pre-filled with whatever
+// is already saved for today (one entry per day — submitting overwrites it).
+export const buildGratitudeModal = (existing?: string): ModalBuilder => {
+  const input = new TextInputBuilder()
+    .setCustomId(GRATITUDE_INPUT_ID)
+    .setLabel("What are you grateful for today?")
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(true)
+    .setMaxLength(1000)
+    .setPlaceholder("Today I'm grateful for…");
+  if (existing) input.setValue(existing);
+  return new ModalBuilder()
+    .setCustomId(GRATITUDE_MODAL_ID)
+    .setTitle("📓 Gratitude Journal")
+    .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
+};
+
+// Ephemeral confirmation shown after a gratitude entry is saved.
+export const buildGratitudeConfirm = (text: string, streak: number): BotMessage =>
+  simpleCard(
+    COLORS.done,
+    "📓 Gratitude saved",
+    `${text}\n\n${fireEmoji(streak)} — keep it going.`,
+  );
+
 // Build check-off buttons for a set of habits, reflecting today's done state:
 // done habits are disabled green ✅ buttons, the rest are tappable.
 export const habitButtons = (
@@ -97,6 +141,17 @@ export const habitButtons = (
     const row = new ActionRowBuilder<ButtonBuilder>();
     for (const h of capped.slice(i, i + BUTTONS_PER_ROW)) {
       const done = state.habits[h.id]?.lastCompletedDate === today;
+      // Gratitude is written, not tapped: its button opens the modal (and stays
+      // enabled so today's entry can be edited even after it's been checked off).
+      if (h.id === GRATITUDE_HABIT_ID) {
+        row.addComponents(
+          new ButtonBuilder()
+            .setCustomId(GRATITUDE_ADD_ID)
+            .setLabel(`${done ? "✅" : h.emoji} ${h.name}`.slice(0, 80))
+            .setStyle(done ? ButtonStyle.Success : ButtonStyle.Primary),
+        );
+        continue;
+      }
       row.addComponents(
         new ButtonBuilder()
           .setCustomId(`check:${h.id}`)
@@ -131,7 +186,7 @@ export const SLOT_INFO: Record<TimeSlot, { label: string; emoji: string; color: 
   evening: { label: "Evening", emoji: "🌙", color: COLORS.evening },
 };
 
-const FOOTER = "Accountability bot • one reply can check off several habits";
+const FOOTER = "Accountability bot • tap a button to check off a habit";
 
 // Base card: colored bar + emoji title. Callers add description/fields/footer.
 export const card = (color: number, title: string): EmbedBuilder =>
@@ -154,20 +209,21 @@ export interface HelpSchedule {
 export const buildHelp = (schedule: HelpSchedule): BotMessage => {
   const embed = card(COLORS.help, "🤖 Accountability Bot — How It Works")
     .setDescription(
-      "Reply with what you did and I'll check it off and track a streak per habit — e.g. " +
-        '*"drank my water and prayed"*. You can mention several at once. Habits are grouped ' +
-        "into **morning**, **afternoon**, and **evening**, each with its own check-in.",
+      "Tap a habit's button on a check-in to check it off — it turns green ✅ and I track a " +
+        "streak per habit. Habits are grouped into **morning**, **afternoon**, and **evening**, " +
+        "each with its own check-in. Use the slash commands below to see progress or add habits.",
     )
     .addFields(
       {
-        name: "📋 Commands",
+        name: "📋 Commands (all replies are private)",
         value: [
-          "• `summary` / `status` — today's progress (done + what's left)",
-          "• `morning` / `afternoon` / `evening` — what's left in that slot",
-          "• `add_habit <slot> <name>` — track a new habit in a slot, e.g. `add_habit morning 🧴 Moisturize`",
-          "• `undo <habit>` — remove today's check-off, e.g. `undo water`",
-          "• `audible` — check today's Audible minutes, auto-check reading at 30 min",
-          "• `help` — this message",
+          "• `/summary` — today's progress (done + what's left)",
+          "• `/slot <slot>` — what's left in one slot (morning/afternoon/evening)",
+          "• `/gratitude` — write or edit today's gratitude entry (checks off the streak)",
+          "• `/add-habit <slot> <name>` — track a new habit, optional leading emoji",
+          "• `/undo <habit>` — remove today's check-off, e.g. `water`",
+          "• `/audible` — check today's Audible minutes, auto-check reading at 30 min",
+          "• `/help` — this message",
         ].join("\n"),
       },
       {
@@ -190,7 +246,7 @@ export const buildDailyPrompt = (userId: string, tz: string): BotMessage => {
     return `${h.emoji} **${h.name}** — ${tail}`;
   });
   const embed = card(COLORS.daily, "☀️ Daily Check-In")
-    .setDescription("What did you get done today? Reply and I'll check things off.")
+    .setDescription("What did you get done today? Tap a habit below to check it off.")
     .addFields({ name: "🔥 Today's Habits", value: lines.join("\n") })
     .setFooter({ text: FOOTER });
   return { content: `<@${userId}>`, embeds: [embed] };
@@ -206,8 +262,8 @@ export const buildCategoryPrompt = (userId: string, tz: string, slot: TimeSlot):
   const embed = card(info.color, `${info.emoji} ${info.label} Check-In`)
     .setDescription(
       slotHabits.length
-        ? `Your **${info.label.toLowerCase()}** habits — reply with what you got done.`
-        : `No **${info.label.toLowerCase()}** habits yet. Add one with \`add_habit ${slot} <name>\`.`,
+        ? `Your **${info.label.toLowerCase()}** habits — tap the ones you got done.`
+        : `No **${info.label.toLowerCase()}** habits yet. Add one with \`/add-habit\`.`,
     )
     .setFooter({ text: FOOTER });
 
@@ -237,18 +293,17 @@ export const remainingHabits = (tz: string): Habit[] => {
   });
 };
 
-export const buildReminder = (userId: string, remaining: Habit[]): BotMessage => {
+export const buildReminder = (userId: string, remaining: Habit[], tz: string): BotMessage => {
   const embed = card(COLORS.nudge, "⏰ Evening Nudge")
     .setDescription(
-      `**${remaining.length} left** to finish today. Reply with what you knocked ` +
-        "out and I'll check them off. 💪",
+      `**${remaining.length} left** to finish today. Tap the ones you knocked out. 💪`,
     )
     .addFields({
       name: "⬜ Still to do",
       value: remaining.map((h) => `${h.emoji} ${h.name}`).join("\n"),
     })
     .setFooter({ text: FOOTER });
-  return { content: `<@${userId}>`, embeds: [embed] };
+  return { content: `<@${userId}>`, embeds: [embed], components: habitButtons(remaining, tz) };
 };
 
 // On-demand progress report: what's done today (with streaks) and what's left.
@@ -311,7 +366,7 @@ export const buildSlotSummary = (tz: string, slot: TimeSlot): BotMessage => {
 
   if (slotHabits.length === 0) {
     embed.setDescription(
-      `No **${info.label.toLowerCase()}** habits yet. Add one with \`add_habit ${slot} <name>\`.`,
+      `No **${info.label.toLowerCase()}** habits yet. Add one with \`/add-habit\`.`,
     );
     return { embeds: [embed] };
   }

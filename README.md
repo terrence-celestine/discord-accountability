@@ -3,16 +3,20 @@
 A little accountability partner for your Discord server. Your habits are grouped into three
 **time slots** — morning, afternoon, evening — and each slot gets its own check-in that
 @-mentions you (7am, noon, and 5pm by default). Later in the evening it sends a follow-up
-nudge **only if you haven't finished the whole list**. When you reply with what you did
-("drank my water and prayed"), it recognizes each habit by keyword, checks it off for the day,
-and tracks a **streak per habit**.
+nudge **only if you haven't finished the whole list**. Each check-in has a tappable button per
+habit — tap one to check it off for the day, and it tracks a **streak per habit**.
 
 - **Three daily check-ins** — morning / afternoon / evening, each listing only that slot's habits.
 - **Multiple named habits**, each with its own streak and time slot (edit `src/habits.ts`).
 - **Keyword detection** with a basic negation guard ("didn't shower" won't count).
 - **Persistent** — streaks are saved to `state.json` and survive restarts/redeploys.
-- **Chat commands** — `summary` / `status` (today's progress), `add_habit <name>` (track a
-  custom habit), `undo <habit>` (reverse an accidental check-off), and `help` (list the commands).
+- **Slash commands** (private replies) — `/summary` (today's progress), `/slot` (one slot's
+  progress), `/gratitude` (write today's gratitude entry — see below), `/add-habit` (track a
+  custom habit), `/undo` (reverse an accidental check-off), and `/help`. Replies are ephemeral,
+  so they never clutter the channel.
+- **Gratitude journal** — `/gratitude` opens a modal to write (or edit) one entry per day; saving
+  it checks off the built-in `gratitude` habit and earns its streak. A 🙏 button on the evening
+  check-in opens the same modal.
 - **Audible auto-check-off** (optional) — the Reading habit checks itself off once you've
   listened ≥30 min on Audible that day. See [Audible integration](#audible-integration-optional).
 - **Samsung Health ingest** (optional) — push steps/water/meditation over HTTP and the matching
@@ -21,14 +25,17 @@ and tracks a **streak per habit**.
 
 ## How it works
 
-Reading your replies requires a real bot (a live gateway connection with the **Message
-Content Intent**), not just a webhook. So this is a small always-on `discord.js` process:
-`node-cron` fires the daily prompt, and a `messageCreate` handler processes your replies.
+The bot posts scheduled check-ins with tappable buttons and answers slash commands — all through
+a live `discord.js` gateway connection. `node-cron` fires the daily prompts; an `InteractionCreate`
+router handles button check-offs, slash commands, and the gratitude modal. Because everything the
+user does is an interaction (not a chat message), the bot needs **only the Guilds intent** — the
+privileged **Message Content Intent can stay OFF**.
 
 | File | What it is |
 |------|------------|
-| `src/index.ts` | Discord wiring: intents, daily cron prompt + evening nudge, reply handler. |
-| `src/logic.ts` | Pure logic (keyword matching, streak formatting, cron parsing) — no Discord, easy to test. |
+| `src/index.ts` | Discord wiring: intents, daily cron prompts + evening nudge, and the interaction router (buttons, slash commands, modals). |
+| `src/commands.ts` | Slash-command definitions + guild registration. |
+| `src/logic.ts` | Pure logic (streak formatting, cron parsing, message/modal builders) — no gateway, easy to test. |
 | `src/habits.ts` | Your habit list (name + emoji + time slot + keywords). **Edit this.** |
 | `src/store.ts` | Streak state + math, saved to `state.json`. |
 | `src/audible.ts` | Optional Audible integration: derives minutes listened, auto-checks off Reading. |
@@ -44,14 +51,20 @@ Content Intent**), not just a webhook. So this is a small always-on `discord.js`
 
 1. Go to <https://discord.com/developers/applications> → **New Application**, name it.
 2. **Bot** tab → **Reset Token** → copy it. This is `DISCORD_TOKEN` (keep it secret).
-3. On the same Bot tab, under **Privileged Gateway Intents**, turn ON **Message Content
-   Intent**. (Without this the bot can't read your replies.)
+3. **No privileged intents are required.** The bot uses only the Guilds intent, so you can leave
+   **Message Content Intent OFF** (check-offs happen via buttons and slash commands, not by reading
+   your messages).
 
 ## 2. Invite it to your server
 
-1. **OAuth2 → URL Generator**: check scope **`bot`**.
-2. Under Bot Permissions check: **Send Messages**, **Read Message History**, **Add Reactions**.
+1. **OAuth2 → URL Generator**: check scopes **`bot`** and **`applications.commands`** (the second
+   is what lets the bot register its slash commands — without it, command registration fails with
+   "Missing Access").
+2. Under Bot Permissions check: **Send Messages**, **Read Message History**.
 3. Open the generated URL, pick your server, authorize.
+
+> Already had the bot in your server before slash commands existed? **Re-invite it** with the
+> updated URL (now including `applications.commands`) — same server, it just grants the new scope.
 
 ## 3. Grab the IDs
 
@@ -81,8 +94,9 @@ Set `SEND_NOW=1` in `.env` if you want it to fire one check-in immediately, then
 npm run dev               # compiles TypeScript, then runs the bot with .env loaded
 ```
 
-Reply in the channel ("drank my water and prayed") and watch it react ✅ and report your
-streak. `./data/state.json` will show the saved streak.
+Tap a habit's button on the check-in (or run `/summary`) and watch the button turn green ✅ with a
+private streak confirmation. `./data/state.json` will show the saved streak. Slash commands appear
+in the server once the bot has registered them on startup (needs the `applications.commands` scope).
 
 Other scripts: `npm run build` (compile only), `npm run typecheck` (type-check `src/` + tests),
 `npm start` (run the already-compiled `dist/`, used by Railway).
@@ -196,26 +210,22 @@ a fresh deploy, and the `/data` volume keeps your streaks across deploys.
 
 ## Notes
 
-- **Check-off buttons** — each slot check-in (and the `morning`/`afternoon`/`evening` commands)
-  renders a tappable button per habit below the message. Tap one to check it off: it turns green
-  ✅ and disables, and you get a private streak confirmation. Buttons and text replies both work;
-  buttons cap at 25 per message, so anything beyond that is still checkable by text.
-- Reply again the same day and it won't double-count ("already checked off").
+- **Check-off buttons** — each slot check-in (and the evening nudge) renders a tappable button per
+  habit below the message. Tap one to check it off: it turns green ✅ and disables, and you get a
+  private streak confirmation. Buttons cap at 25 per message.
+- Tap again the same day and it won't double-count ("already checked off").
 - Miss a day and the streak resets to 1 on your next check-in; the daily prompt shows a
   streak as broken once a full day is missed.
-- The bot only reacts to **your** user ID in the **configured channel** — it ignores everyone
-  else and other channels.
-- **Commands** (optionally prefixed with `!` or `/`):
-  - **`summary`** / **`status`** — on-demand report of today's progress (done habits with their
-    streaks, plus what's left).
-  - **`morning`** / **`afternoon`** / **`evening`** — what's still left to do in that one time
-    slot (plus what's already done there), without the other slots' noise.
-  - **`add_habit <slot> <name>`** — start tracking a custom habit in a time slot. The slot
-    (`morning` / `afternoon` / `evening`) is **required** and comes first, followed by an optional
-    leading emoji (e.g. `add_habit morning 🧴 Moisturize`). Without an emoji it gets a default icon
-    (📌). Keywords for checking it off are derived from the name (the whole phrase plus each
-    meaningful word), and it joins that slot's check-in, the summary, and the nudge immediately.
-    Custom habits are persisted in `DATA_DIR/state.json`.
-  - **`undo <habit>`** — reverse today's check-off for a habit (e.g. `undo water`, or
-    `undo water and pray` for several). Steps the streak back; leaves your all-time best intact.
-  - **`help`** — lists the commands and how check-off works.
+- The bot only accepts interactions from **your** user ID — it politely refuses everyone else.
+- **Slash commands** — all reply **ephemerally** (only you see them), so they never clutter the channel:
+  - **`/summary`** — today's progress (done habits with their streaks, plus what's left).
+  - **`/slot <slot>`** — what's still left in one time slot (plus what's already done there).
+  - **`/gratitude`** — opens a modal to write or edit today's gratitude entry. Saving it records the
+    entry (one per day, editable) **and** checks off the built-in `gratitude` habit for its streak.
+    A 🙏 button on the evening check-in opens the same modal.
+  - **`/add-habit <slot> <name> [emoji]`** — start tracking a custom habit in a time slot. The slot
+    is a dropdown; `name` is required; `emoji` is optional (defaults to 📌). It joins that slot's
+    check-in and the summary immediately and is persisted in `DATA_DIR/state.json`.
+  - **`/undo <habit>`** — reverse today's check-off for a habit (e.g. `water`). Steps the streak
+    back; leaves your all-time best intact.
+  - **`/help`** — lists the commands and how check-off works.

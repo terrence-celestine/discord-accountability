@@ -69,7 +69,7 @@ test("remainingHabits ignores completions from a previous day", () => {
 
 test("buildReminder lists the remaining habits and mentions the user", () => {
   const remaining = habits.filter((h) => h.id === "steps" || h.id === "walk_dog");
-  const msg = buildReminder("u1", remaining);
+  const msg = buildReminder("u1", remaining, TZ);
   expect(msg.content).toMatch(/<@u1>/); // the ping lives in content, not the embed
   const text = cardText(msg);
   expect(text).toMatch(/2 left/);
@@ -128,10 +128,11 @@ test("buildHelp lists the commands and the configured schedule times", () => {
   const text = cardText(
     buildHelp({ morning: "07:00", afternoon: "12:00", evening: "17:00", reminder: "20:00" }),
   );
-  expect(text).toMatch(/summary.*status/);
-  expect(text).toContain("undo <habit>");
-  expect(text).toContain("audible");
-  expect(text).toContain("help");
+  expect(text).toContain("/summary");
+  expect(text).toContain("/undo");
+  expect(text).toContain("/gratitude");
+  expect(text).toContain("/audible");
+  expect(text).toContain("/help");
   expect(text).toContain("07:00");
   expect(text).toContain("12:00");
   expect(text).toContain("17:00");
