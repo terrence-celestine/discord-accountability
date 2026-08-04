@@ -52,3 +52,20 @@ test("gratitude entries survive alongside other state", () => {
   expect(state.gratitude).toEqual({ [store.todayStr(TZ)]: "thankful" });
   expect(state.habits.water.currentStreak).toBe(1);
 });
+
+test("journal-channel message id: unset, set, and overwrite for today", () => {
+  expect(store.getGratitudeMessageId(TZ)).toBeUndefined();
+  store.setGratitudeMessageId("msg-1", TZ);
+  expect(store.getGratitudeMessageId(TZ)).toBe("msg-1");
+  store.setGratitudeMessageId("msg-2", TZ);
+  expect(store.getGratitudeMessageId(TZ)).toBe("msg-2"); // one id per day
+});
+
+test("message id and entry text are stored independently per day", () => {
+  store.setGratitude("thankful", TZ);
+  store.setGratitudeMessageId("msg-1", TZ);
+  const state = store.load();
+  const today = store.todayStr(TZ);
+  expect(state.gratitude).toEqual({ [today]: "thankful" });
+  expect(state.gratitudeMessages).toEqual({ [today]: "msg-1" });
+});

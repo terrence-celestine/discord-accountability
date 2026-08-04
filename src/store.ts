@@ -43,6 +43,7 @@ export interface State {
   health?: HealthState; // latest pushed Samsung Health values for the current day
   customHabits?: Habit[]; // user-defined habits added at runtime via /add-habit
   gratitude?: Record<string, string>; // local day (YYYY-MM-DD) → that day's gratitude entry
+  gratitudeMessages?: Record<string, string>; // local day → the journal-channel message id for that day
 }
 
 export interface CheckOffResult {
@@ -214,6 +215,18 @@ export const getGratitude = (tz: string, day?: string): string | undefined =>
 export const setGratitude = (text: string, tz: string): void => {
   const s = load();
   s.gratitude = { ...(s.gratitude ?? {}), [todayStr(tz)]: text };
+  save(s);
+};
+
+// The journal-channel message id posted for a day's entry (if the optional
+// gratitude channel is configured). Lets edits update that day's card in place
+// instead of posting a duplicate.
+export const getGratitudeMessageId = (tz: string, day?: string): string | undefined =>
+  load().gratitudeMessages?.[day ?? todayStr(tz)];
+
+export const setGratitudeMessageId = (id: string, tz: string): void => {
+  const s = load();
+  s.gratitudeMessages = { ...(s.gratitudeMessages ?? {}), [todayStr(tz)]: id };
   save(s);
 };
 

@@ -126,6 +126,15 @@ export const buildGratitudeConfirm = (text: string, streak: number): BotMessage 
     `${text}\n\n${fireEmoji(streak)} — keep it going.`,
   );
 
+// The card posted to the optional gratitude journal channel — one per day, edited
+// in place when that day's entry changes so the channel reads as a clean archive.
+export const buildGratitudeEntryCard = (day: string, text: string, streak: number): BotMessage => {
+  const embed = card(COLORS.evening, `📓 Gratitude — ${day}`)
+    .setDescription(text)
+    .setFooter({ text: fireEmoji(streak) });
+  return { embeds: [embed] };
+};
+
 // Build check-off buttons for a set of habits, reflecting today's done state:
 // done habits are disabled green ✅ buttons, the rest are tappable.
 export const habitButtons = (

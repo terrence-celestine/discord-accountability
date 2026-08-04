@@ -34,6 +34,7 @@ import {
   buildHelp,
   buildGratitudeModal,
   buildGratitudeConfirm,
+  buildGratitudeEntryCard,
   GRATITUDE_HABIT_ID,
   GRATITUDE_ADD_ID,
   GRATITUDE_MODAL_ID,
@@ -83,6 +84,10 @@ const READING_MINUTES = Number(process.env.READING_MINUTES ?? "30"); // Audible 
 const INGEST_TOKEN = process.env.INGEST_TOKEN;
 const PORT = Number(process.env.PORT ?? "3000");
 
+// Optional gratitude journal channel: when set, each saved entry is mirrored here
+// as a per-day card (edited in place on later edits). Unset → no mirroring.
+const GRATITUDE_CHANNEL_ID = process.env.GRATITUDE_CHANNEL_ID;
+
 // Fail fast at startup if any schedule time is malformed.
 const slotExprs: Record<TimeSlot, string> = {
   morning: timeToCron(SLOT_TIMES.morning),
@@ -112,6 +117,37 @@ const sendMessage = async (payload: BotMessage): Promise<void> => {
     components: payload.components ?? [],
     allowedMentions: { users: [USER_ID] }, // only ping the one user
   });
+};
+
+// Mirror today's gratitude entry into the optional journal channel as a per-day
+// card. Edits the existing message in place (one card per day) so the channel
+// reads as a clean archive; posts a fresh card if there isn't one yet. Best-effort:
+// any failure is logged and swallowed so it never breaks the interaction reply.
+const mirrorGratitudeToChannel = async (text: string, streak: number): Promise<void> => {
+  if (!GRATITUDE_CHANNEL_ID) return;
+  try {
+    const channel = await client.channels.fetch(GRATITUDE_CHANNEL_ID);
+    if (!channel?.isTextBased() || !("send" in channel)) {
+      console.error(`Gratitude channel ${GRATITUDE_CHANNEL_ID} isn't a text channel the bot can post in.`);
+      return;
+    }
+    const day = store.todayStr(TZ);
+    const cardMsg = buildGratitudeEntryCard(day, text, streak);
+    const existingId = store.getGratitudeMessageId(TZ);
+    if (existingId) {
+      try {
+        const msg = await channel.messages.fetch(existingId);
+        await msg.edit({ embeds: cardMsg.embeds });
+        return;
+      } catch {
+        // The stored message was deleted or is unreachable — fall through to repost.
+      }
+    }
+    const sent = await (channel as TextChannel).send({ embeds: cardMsg.embeds });
+    store.setGratitudeMessageId(sent.id, TZ);
+  } catch (err) {
+    console.error("Failed to mirror gratitude entry to channel:", err);
+  }
 };
 
 const sendDailyPrompt = async (): Promise<void> => {
@@ -251,6 +287,12 @@ client.once(Events.ClientReady, (c) => {
     console.log("Audible integration disabled (no credentials).");
   }
 
+  console.log(
+    GRATITUDE_CHANNEL_ID
+      ? `Gratitude journal channel enabled — mirroring entries to ${GRATITUDE_CHANNEL_ID}.`
+      : "Gratitude journal channel disabled (no GRATITUDE_CHANNEL_ID).",
+  );
+
   if (SEND_NOW === "1") {
     console.log("SEND_NOW=1 → sending one prompt now.");
     void sendDailyPrompt();
@@ -362,6 +404,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
     } else {
       await interaction.reply({ ...confirm, flags: MessageFlags.Ephemeral });
     }
+
+    // Mirror to the journal channel last — the interaction is already acknowledged,
+    // so a slow/failed channel post can't delay or break the private confirmation.
+    await mirrorGratitudeToChannel(text, res.currentStreak);
     return;
   }
 });

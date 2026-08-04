@@ -16,7 +16,9 @@ habit — tap one to check it off for the day, and it tracks a **streak per habi
   so they never clutter the channel.
 - **Gratitude journal** — `/gratitude` opens a modal to write (or edit) one entry per day; saving
   it checks off the built-in `gratitude` habit and earns its streak. A 🙏 button on the evening
-  check-in opens the same modal.
+  check-in opens the same modal. Set an optional **`GRATITUDE_CHANNEL_ID`** and each entry is also
+  mirrored to that channel as a per-day card (edited in place on later edits) — a scrollable journal
+  archive. Use a **private** channel; see [Gratitude journal channel](#gratitude-journal-channel-optional).
 - **Audible auto-check-off** (optional) — the Reading habit checks itself off once you've
   listened ≥30 min on Audible that day. See [Audible integration](#audible-integration-optional).
 - **Samsung Health ingest** (optional) — push steps/water/meditation over HTTP and the matching
@@ -179,6 +181,23 @@ public URL under **Service → Settings → Networking → Generate Domain** so 
 Railway injects `PORT` automatically; the bot listens on it. Point your phone automation at
 `https://<your-domain>/ingest` with the `Authorization: Bearer` header.
 
+## Gratitude journal channel (optional)
+
+`/gratitude` always saves one editable entry per day (and checks off the `gratitude` habit for
+its streak). Set **`GRATITUDE_CHANNEL_ID`** and every entry is *also* mirrored to that channel as
+a per-day card — turning the channel into a scrollable, searchable journal archive.
+
+- **One card per day, edited in place.** Writing today's entry posts a card; editing it later
+  updates the *same* card instead of stacking duplicates (the message id is tracked in `state.json`).
+- **Use a private channel.** Entries are personal — pick a channel only you (and the bot) can see.
+  The bot needs **View Channel** and **Send Messages** there.
+- **Forward-only.** Only entries written after you set this up appear; there's nothing to backfill
+  unless you already have entries saved in `state.json`.
+- Leave it unset and nothing is mirrored — `/gratitude` still works exactly the same.
+
+Get the id by right-clicking the channel → **Copy Channel ID** (Developer Mode on), then set
+`GRATITUDE_CHANNEL_ID` locally in `.env` or in Railway's Variables.
+
 ## 6. Deploy to Railway (always-on)
 
 Railway deploys straight from GitHub and redeploys on every push.
@@ -190,9 +209,10 @@ Railway deploys straight from GitHub and redeploys on every push.
    across deploys.
 4. **Variables** (service → Variables): set `DISCORD_TOKEN`, `CHANNEL_ID`, `USER_ID`, `TZ`,
    `MORNING_TIME`, `AFTERNOON_TIME`, `EVENING_TIME`, `REMINDER_TIME`, and `DATA_DIR=/data`.
-   (Leave `SEND_NOW` unset in production.) To enable the Samsung Health endpoints, also set
-   `INGEST_TOKEN` (and optionally `STEPS_GOAL` / `WATER_GOAL_GALLONS` / `MEDITATION_MINUTES`) —
-   see [Samsung Health ingest](#samsung-health-ingest-optional).
+   (Leave `SEND_NOW` unset in production.) Optionally set `GRATITUDE_CHANNEL_ID` to mirror
+   gratitude entries to a channel — see [Gratitude journal channel](#gratitude-journal-channel-optional).
+   To enable the Samsung Health endpoints, also set `INGEST_TOKEN` (and optionally `STEPS_GOAL` /
+   `WATER_GOAL_GALLONS` / `MEDITATION_MINUTES`) — see [Samsung Health ingest](#samsung-health-ingest-optional).
 
 Build and start are driven by `railway.json`: it runs `npm run build` (compiles `src/` →
 `dist/`) and starts with `node dist/index.js`. **The start command must point at
